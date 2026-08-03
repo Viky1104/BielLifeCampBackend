@@ -1,0 +1,19 @@
+spring:
+  config:
+    activate:
+      on-profile: nacos
+    import:
+      - optional:nacos:${spring.application.name}.yaml?group=${NACOS_GROUP:LIFECAMP}&refreshEnabled=true
+  cloud:
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      username: ${NACOS_USERNAME:nacos}
+      password: ${NACOS_PASSWORD:}
+      discovery:
+        enabled: true
+        namespace: ${NACOS_NAMESPACE:}
+        group: ${NACOS_GROUP:LIFECAMP}
+      config:
+        enabled: true
+        namespace: ${NACOS_NAMESPACE:}
+        group: ${NACOS_GROUP:LIFECAMP}

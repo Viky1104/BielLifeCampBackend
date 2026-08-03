@@ -1,0 +1,242 @@
+openapi: 3.1.0
+info:
+  title: Biel Life Camp P0 Common Contract
+  version: 1.0.0
+  description: 仅包含跨服务技术协议，不包含共享领域实体。
+servers:
+  - url: /
+paths: {}
+components:
+  securitySchemes:
+    ExternalBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 由 system-service 签发、audience 为 Gateway 的 15 分钟访问 JWT。
+    InternalIdentity:
+      type: apiKey
+      in: header
+      name: X-Internal-Identity
+      description: Gateway 签发、audience 绑定目标服务、最长 60 秒的内部身份 JWS。
+    ServiceMtls:
+      type: mutualTLS
+      description: 受控内网服务身份；与 InternalIdentity 共同用于代理员工调用。
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: 调用方生成的请求标识；缺失时由入口生成。
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 同一主体、接口和业务命令范围内唯一，服务端至少保留到业务终态。
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 512
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  headers:
+    RequestId:
+      description: 服务端最终采用的请求标识。
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: 请求字段或业务前置条件不合法。
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+    Unauthorized:
+      description: 缺少、无效或已撤销的认证信息。
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+    Forbidden:
+      description: 权限或数据范围不足。
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+    NotFound:
+      description: 资源不存在或调用方无权感知其存在。
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+    Conflict:
+      description: 幂等冲突、版本冲突或状态机冲突。
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+  schemas:
+    DistributedId:
+      type: string
+      pattern: '^[1-9][0-9]{0,18}$'
+      description: 数据库 BIGINT 在 JSON 中的十进制字符串表示。
+      examples: ['1900000000000000001']
+    UtcDateTime:
+      type: string
+      format: date-time
+      description: RFC 3339 UTC 时间。
+      examples: ['2026-07-21T08:00:00.000Z']
+    ApiResponse:
+      type: object
+      additionalProperties: false
+      description: 所有前后端 HTTP JSON 接口统一使用的响应外层结构。
+      required: [code, errorMsg, data]
+      properties:
+        code:
+          type: string
+          pattern: '^(0|[A-Z][A-Z0-9_]{2,63})$'
+          description: 成功固定为字符串 0；失败使用稳定业务错误码。
+        errorMsg:
+          type: string
+          maxLength: 500
+          description: 成功时为空字符串，失败时为面向调用方的错误消息。
+        data:
+          description: 成功时为业务数据，失败时为 null。
+    EmptyApiResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            code:
+              const: '0'
+            errorMsg:
+              const: ''
+            data:
+              type: 'null'
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [field, reason]
+      properties:
+        field:
+          type: string
+          maxLength: 128
+        reason:
+          type: string
+          maxLength: 500
+    CursorPage:
+      type: object
+      additionalProperties: false
+      required: [hasMore]
+      properties:
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 512
+        hasMore:
+          type: boolean
+    OperationAccepted:
+      type: object
+      additionalProperties: false
+      required: [operationId, status]
+      properties:
+        operationId:
+          $ref: '#/components/schemas/DistributedId'
+        status:
+          type: string
+          enum: [ACCEPTED]
+    DataScope:
+      type: object
+      additionalProperties: false
+      required: [scopeType]
+      properties:
+        scopeType:
+          type: string
+          enum: [SELF, OWN_ORG, DESCENDANT_ORGS, SELECTED_ORGS, ALL_ORGS, SELECTED_RESOURCES]
+        resourceType:
+          type: [string, 'null']
+          enum: [ORGANIZATION, STORE, SKU, null]
+        resourceIds:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/DistributedId'
+    InternalIdentityClaims:
+      type: object
+      additionalProperties: false
+      required: [iss, aud, sub, sid, org_id, client_type, role_codes, permissions, data_scopes, authz_ver, amr, iat, nbf, exp, jti]
+      properties:
+        iss:
+          type: string
+        aud:
+          type: string
+        sub:
+          $ref: '#/components/schemas/DistributedId'
+        sid:
+          $ref: '#/components/schemas/DistributedId'
+        org_id:
+          $ref: '#/components/schemas/DistributedId'
+        client_type:
+          type: string
+          enum: [MINI_PROGRAM, ADMIN_WEB]
+        role_codes:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$'
+        data_scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataScope'
+        authz_ver:
+          type: integer
+          minimum: 1
+        amr:
+          type: array
+          items:
+            type: string
+        iat:
+          type: integer
+        nbf:
+          type: integer
+        exp:
+          type: integer
+        jti:
+          type: string

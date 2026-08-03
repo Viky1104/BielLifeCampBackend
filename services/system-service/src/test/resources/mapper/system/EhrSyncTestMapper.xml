@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.biel.lifecamp.system.dao.EhrSyncTestMapper">
+    <resultMap id="employeeProjectionMap"
+               type="com.biel.lifecamp.system.dao.EhrSyncTestMapper$EmployeeProjection">
+        <constructor>
+            <idArg column="id" javaType="java.lang.Long"/>
+            <arg column="ehr_person_id" javaType="java.lang.String"/>
+            <arg column="employee_no" javaType="java.lang.String"/>
+            <arg column="display_name" javaType="java.lang.String"/>
+            <arg column="employment_status" javaType="java.lang.String"/>
+            <arg column="account_status" javaType="java.lang.String"/>
+            <arg column="supervisor_employee_no" javaType="java.lang.String"/>
+            <arg column="supervisor_employee_id" javaType="java.lang.Long"/>
+            <arg column="professional_title" javaType="java.lang.String"/>
+            <arg column="job_name" javaType="java.lang.String"/>
+            <arg column="position_name" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <delete id="deleteRoleAssignments">DELETE FROM sys_role_assignment</delete>
+    <delete id="deleteWechatProfiles">DELETE FROM sys_wechat_profile</delete>
+    <delete id="deleteExternalIdentities">DELETE FROM sys_external_identity</delete>
+    <delete id="deleteLocalCredentials">DELETE FROM sys_local_credential</delete>
+    <delete id="deleteSyncIssues">DELETE FROM sys_ehr_sync_issue</delete>
+
+    <select id="countSyncIssues" resultType="long">
+        SELECT COUNT(*)
+        FROM sys_ehr_sync_issue
+    </select>
+    <delete id="deleteEmployeeStages">DELETE FROM sys_ehr_employee_stage</delete>
+    <delete id="deleteSyncRuns">DELETE FROM sys_ehr_sync_run</delete>
+    <delete id="deleteTaskLeases">DELETE FROM sys_task_lease</delete>
+    <delete id="deleteEmployees">DELETE FROM sys_employee</delete>
+
+    <insert id="insertLocalBootstrapEmployee">
+        INSERT INTO sys_employee
+            (ehr_person_id, employee_no, display_name, source_type,
+             employment_status, binding_status, account_status, authz_version)
+        VALUES
+            ('LOCAL_SUPER_ADMIN', 'admin', '系统管理员', 'LOCAL_BOOTSTRAP',
+             'ACTIVE', 'UNBOUND', 'ACTIVE', 1)
+    </insert>
+
+    <update id="resetIntegrationState">
+        UPDATE sys_integration_state
+        SET initial_sync_completed = FALSE,
+            last_successful_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE connection_code = 'EHR'
+    </update>
+
+    <select id="selectEmployees" resultMap="employeeProjectionMap">
+        SELECT id, ehr_person_id, employee_no, display_name,
+               employment_status, account_status, supervisor_employee_no,
+               supervisor_employee_id, professional_title, job_name, position_name
+        FROM sys_employee
+        ORDER BY employee_no
+    </select>
+
+    <select id="countEmployeeRoleAssignments" resultType="int">
+        SELECT COUNT(*)
+        FROM sys_role_assignment a
+        INNER JOIN sys_role r ON r.id = a.role_id
+        WHERE r.role_code = 'EMPLOYEE' AND a.status = 'ACTIVE'
+    </select>
+
+    <select id="selectInitialSyncCompleted" resultType="java.lang.Boolean">
+        SELECT initial_sync_completed
+        FROM sys_integration_state
+        WHERE connection_code = 'EHR'
+    </select>
+
+    <select id="selectEmploymentStatusByEmployeeNo" resultType="java.lang.String">
+        SELECT employment_status
+        FROM sys_employee
+        WHERE employee_no = #{employeeNo}
+    </select>
+</mapper>

@@ -1,0 +1,1437 @@
+openapi: 3.1.0
+info:
+  title: Biel Life Camp System Service API
+  version: 1.0.0
+  description: P0 身份、组织、RBAC、第三方配置和操作审计契约。
+servers:
+  - url: /
+tags:
+  - name: Authentication
+  - name: Employees
+  - name: EhrSynchronization
+  - name: Authorization
+  - name: Integrations
+  - name: Audit
+  - name: Internal
+paths:
+  /api/system/v1/auth/wechat/login:
+    post:
+      tags: [Authentication]
+      operationId: loginWithWechat
+      summary: loginWithWechat
+      description: 后端始终以 loginCode 向微信换取 OpenID。已有活动绑定时 phoneCode 可省略；没有绑定时必须提供 phoneCode，且手机号只能唯一匹配本地 EHR 在职员工。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WechatLoginRequest'
+      responses:
+        '200':
+          description: 已绑定员工登录成功；首次登录仅在微信手机号唯一匹配本地 EHR 在职员工时自动绑定并成功。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPairApiResponse'
+        '400':
+          $ref: './common.yaml#/components/responses/BadRequest'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+        '503':
+          description: EHR 初始全量同步尚未成功，登录入口失败关闭。
+          content:
+            application/json:
+              schema:
+                $ref: './common.yaml#/components/schemas/ApiResponse'
+  /api/system/v1/auth/admin/login:
+    post:
+      tags: [Authentication]
+      operationId: loginAdminWithPassword
+      summary: 管理后台密码登录
+      description: 过渡和应急登录入口，默认关闭。账号不存在与密码错误统一返回 AUTH_INVALID_CREDENTIALS。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+      responses:
+        '200':
+          description: 登录成功，签发 ADMIN_WEB/password 会话。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPairApiResponse'
+        '400':
+          $ref: './common.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthorized'
+        '503':
+          description: 本地密码登录未启用或登录限流依赖不可用。
+          content:
+            application/json:
+              schema:
+                $ref: './common.yaml#/components/schemas/ApiResponse'
+  /api/system/v1/auth/sso/authorize:
+    get:
+      tags: [Authentication]
+      operationId: beginEnterpriseSso
+      summary: beginEnterpriseSso
+      security: []
+      parameters:
+        - name: redirectUri
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: clientType
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [ADMIN_WEB, REVIEW_WEB]
+      responses:
+        '302':
+          description: 跳转至企业 OIDC Provider；服务端生成 state、nonce 和 PKCE。
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        '400':
+          $ref: './common.yaml#/components/responses/BadRequest'
+  /api/system/v1/auth/sso/callback:
+    get:
+      tags: [Authentication]
+      operationId: completeEnterpriseSso
+      summary: completeEnterpriseSso
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 2048
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 512
+      responses:
+        '302':
+          description: 校验成功后跳转回白名单前端回调页；一次性交换码放在服务端安全会话中。
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        '400':
+          $ref: './common.yaml#/components/responses/BadRequest'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+  /api/system/v1/auth/sso/exchange:
+    post:
+      tags: [Authentication]
+      operationId: exchangeEnterpriseSsoCode
+      summary: exchangeEnterpriseSsoCode
+      security: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SsoExchangeRequest'
+      responses:
+        '200':
+          description: 一次性交换码校验成功并签发本系统令牌；交换码立即失效。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthorized'
+  /api/system/v1/auth/token/refresh:
+    post:
+      tags: [Authentication]
+      operationId: refreshAccessToken
+      summary: refreshAccessToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: 刷新成功；旧刷新令牌同时失效。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPairApiResponse'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthorized'
+  /api/system/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logoutCurrentSession
+      summary: logoutCurrentSession
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 当前会话已撤销；重复调用仍返回统一成功响应。
+          content:
+            application/json:
+              schema:
+                $ref: './common.yaml#/components/schemas/EmptyApiResponse'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthorized'
+  /api/system/v1/auth/logout-all:
+    post:
+      tags: [Authentication]
+      operationId: logoutAllSessions
+      summary: logoutAllSessions
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 当前员工全部会话已撤销。
+          content:
+            application/json:
+              schema:
+                $ref: './common.yaml#/components/schemas/EmptyApiResponse'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthorized'
+  /api/system/v1/me:
+    get:
+      tags: [Authentication]
+      operationId: getCurrentSubject
+      summary: getCurrentSubject
+      security:
+        - ExternalBearer: []
+      responses:
+        '200':
+          description: 当前员工及授权摘要。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentSubjectApiResponse'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthorized'
+  /api/system/v1/employees:
+    get:
+      tags: [Employees]
+      operationId: searchEmployees
+      summary: searchEmployees
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Cursor'
+        - $ref: './common.yaml#/components/parameters/PageSize'
+        - name: keyword
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: organizationId
+          in: query
+          schema:
+            $ref: './common.yaml#/components/schemas/DistributedId'
+        - name: accountStatus
+          in: query
+          schema:
+            $ref: '#/components/schemas/AccountStatus'
+      responses:
+        '200':
+          description: 数据范围内的员工列表。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeePage'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+  /api/system/v1/employees/{employeeId}:
+    get:
+      tags: [Employees]
+      operationId: getEmployee
+      summary: getEmployee
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/EmployeeId'
+      responses:
+        '200':
+          description: 员工详情。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeDetail'
+        '404':
+          $ref: './common.yaml#/components/responses/NotFound'
+  /api/system/v1/employees/{employeeId}/freeze:
+    post:
+      tags: [Employees]
+      operationId: freezeEmployee
+      summary: freezeEmployee
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/EmployeeId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusReasonRequest'
+      responses:
+        '200':
+          description: 冻结后的员工状态；全部会话已撤销。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeDetail'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/system/v1/employees/{employeeId}/unfreeze:
+    post:
+      tags: [Employees]
+      operationId: unfreezeEmployee
+      summary: unfreezeEmployee
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/EmployeeId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusReasonRequest'
+      responses:
+        '200':
+          description: 解冻后的员工状态。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeDetail'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/system/v1/organizations/tree:
+    get:
+      tags: [Employees]
+      operationId: getOrganizationTree
+      summary: getOrganizationTree
+      security:
+        - ExternalBearer: []
+      responses:
+        '200':
+          description: 调用方数据范围内的组织树。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrganizationNode'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+  /api/system/v1/ehr-sync-runs:
+    get:
+      tags: [EhrSynchronization]
+      operationId: listEhrSyncRuns
+      summary: listEhrSyncRuns
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: EHR 首次及每日全量人员同步批次。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EhrSyncRunPageApiResponse'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+    post:
+      tags: [EhrSynchronization]
+      operationId: startEhrSyncRun
+      summary: startEhrSyncRun
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartEhrSyncRequest'
+      responses:
+        '202':
+          description: 手工全量同步任务已执行；每日全量同步由 XXL-JOB 触发。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EhrSyncRunApiResponse'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/system/v1/ehr-sync-runs/{syncRunId}:
+    get:
+      tags: [EhrSynchronization]
+      operationId: getEhrSyncRun
+      summary: getEhrSyncRun
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/SyncRunId'
+      responses:
+        '200':
+          description: 全量同步统计和错误摘要。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EhrSyncRunApiResponse'
+        '404':
+          $ref: './common.yaml#/components/responses/NotFound'
+  /api/system/v1/permissions:
+    get:
+      tags: [Authorization]
+      operationId: listPermissions
+      summary: listPermissions
+      security:
+        - ExternalBearer: []
+      responses:
+        '200':
+          description: 当前版本全部权限码。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Permission'
+  /api/system/v1/roles:
+    get:
+      tags: [Authorization]
+      operationId: listRoles
+      summary: listRoles
+      security:
+        - ExternalBearer: []
+      responses:
+        '200':
+          description: 角色列表。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Role'
+    post:
+      tags: [Authorization]
+      operationId: createCustomRole
+      summary: createCustomRole
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleUpsertRequest'
+      responses:
+        '201':
+          description: 自定义角色已创建。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/system/v1/roles/{roleId}:
+    patch:
+      tags: [Authorization]
+      operationId: updateCustomRole
+      summary: updateCustomRole
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/RoleId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleUpsertRequest'
+      responses:
+        '200':
+          description: 自定义角色已更新并递增受影响员工授权版本。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/system/v1/role-assignments:
+    post:
+      tags: [Authorization]
+      operationId: assignRole
+      summary: assignRole
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleAssignmentRequest'
+      responses:
+        '201':
+          description: 角色及数据范围已分配。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleAssignment'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/system/v1/role-assignments/{assignmentId}:
+    delete:
+      tags: [Authorization]
+      operationId: revokeRoleAssignment
+      summary: revokeRoleAssignment
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: 授权已撤销；禁止撤销最后一名启用超级管理员。
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/system/v1/integrations:
+    get:
+      tags: [Integrations]
+      operationId: listIntegrations
+      summary: listIntegrations
+      security:
+        - ExternalBearer: []
+      responses:
+        '200':
+          description: 第三方连接状态，凭据仅返回掩码和引用。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Integration'
+  /api/system/v1/integrations/{connectionCode}:
+    put:
+      tags: [Integrations]
+      operationId: updateIntegration
+      summary: updateIntegration
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ConnectionCode'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntegrationUpdateRequest'
+      responses:
+        '200':
+          description: 非密钥配置已更新。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Integration'
+  /api/system/v1/integrations/{connectionCode}/credentials:
+    post:
+      tags: [Integrations]
+      operationId: rotateIntegrationCredential
+      summary: rotateIntegrationCredential
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ConnectionCode'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialRotateRequest'
+      responses:
+        '200':
+          description: 凭据已写入 KMS/凭据服务，仅返回新引用和掩码。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Integration'
+  /api/system/v1/integrations/{connectionCode}/test:
+    post:
+      tags: [Integrations]
+      operationId: testIntegration
+      summary: testIntegration
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ConnectionCode'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: 连接测试已进入异步任务。
+          content:
+            application/json:
+              schema:
+                $ref: './common.yaml#/components/schemas/OperationAccepted'
+  /api/system/v1/audit-events:
+    get:
+      tags: [Audit]
+      operationId: searchAuditEvents
+      summary: searchAuditEvents
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Cursor'
+        - $ref: './common.yaml#/components/parameters/PageSize'
+        - name: module
+          in: query
+          schema:
+            type: string
+        - name: actorEmployeeId
+          in: query
+          schema:
+            $ref: './common.yaml#/components/schemas/DistributedId'
+        - name: from
+          in: query
+          schema:
+            $ref: './common.yaml#/components/schemas/UtcDateTime'
+        - name: to
+          in: query
+          schema:
+            $ref: './common.yaml#/components/schemas/UtcDateTime'
+      responses:
+        '200':
+          description: 数据范围内的审计事件。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventPage'
+  /api/system/v1/audit-exports:
+    post:
+      tags: [Audit]
+      operationId: createAuditExport
+      summary: createAuditExport
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditExportRequest'
+      responses:
+        '202':
+          description: 导出任务已创建。
+          content:
+            application/json:
+              schema:
+                $ref: './common.yaml#/components/schemas/OperationAccepted'
+  /internal/system/v1/auth/session-context:
+    post:
+      tags: [Internal]
+      operationId: resolveGatewaySessionContext
+      summary: Gateway 在每次外部请求上校验可撤销会话、账户状态和授权版本
+      security:
+        - ServiceMtls: []
+          GatewayServiceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionContextRequest'
+      responses:
+        '200':
+          description: 按目标服务裁剪后的当前内部身份上下文。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionContextApiResponse'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+        '503':
+          description: system-service 授权状态不可用，Gateway 必须失败关闭。
+          content:
+            application/json:
+              schema:
+                $ref: './common.yaml#/components/schemas/ApiResponse'
+  /internal/system/v1/subjects/{employeeId}/authorization:
+    get:
+      tags: [Internal]
+      operationId: resolveSubjectAuthorization
+      summary: resolveSubjectAuthorization
+      security:
+        - InternalIdentity: []
+          ServiceMtls: []
+      parameters:
+        - $ref: '#/components/parameters/EmployeeId'
+        - name: targetService
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [system-service, workbench-service, points-service, mall-service]
+      responses:
+        '200':
+          description: 当前账户、授权版本及按目标服务裁剪后的授权快照。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationSnapshot'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+  /internal/system/v1/audit-events:
+    post:
+      tags: [Internal]
+      operationId: appendOperationAudit
+      summary: appendOperationAudit
+      security:
+        - InternalIdentity: []
+          ServiceMtls: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditEventAppendRequest'
+      responses:
+        '202':
+          description: 审计事件已持久化或进入可靠本地任务。
+          content:
+            application/json:
+              schema:
+                $ref: './common.yaml#/components/schemas/OperationAccepted'
+components:
+  securitySchemes:
+    ExternalBearer:
+      $ref: './common.yaml#/components/securitySchemes/ExternalBearer'
+    InternalIdentity:
+      $ref: './common.yaml#/components/securitySchemes/InternalIdentity'
+    ServiceMtls:
+      $ref: './common.yaml#/components/securitySchemes/ServiceMtls'
+    GatewayServiceToken:
+      type: apiKey
+      in: header
+      name: X-Gateway-Service-Token
+  parameters:
+    EmployeeId:
+      name: employeeId
+      in: path
+      required: true
+      schema:
+        $ref: './common.yaml#/components/schemas/DistributedId'
+    RoleId:
+      name: roleId
+      in: path
+      required: true
+      schema:
+        $ref: './common.yaml#/components/schemas/DistributedId'
+    AssignmentId:
+      name: assignmentId
+      in: path
+      required: true
+      schema:
+        $ref: './common.yaml#/components/schemas/DistributedId'
+    ConnectionCode:
+      name: connectionCode
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [EHR, WECHAT, ENTERPRISE_SSO, BOXTALK, CANTEEN, SUPERMARKET]
+    SyncRunId:
+      name: syncRunId
+      in: path
+      required: true
+      schema:
+        $ref: './common.yaml#/components/schemas/DistributedId'
+  schemas:
+    TokenPairApiResponse:
+      allOf:
+        - $ref: './common.yaml#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            code:
+              const: '0'
+            errorMsg:
+              const: ''
+            data:
+              $ref: '#/components/schemas/TokenPair'
+    CurrentSubjectApiResponse:
+      allOf:
+        - $ref: './common.yaml#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            code:
+              const: '0'
+            errorMsg:
+              const: ''
+            data:
+              $ref: '#/components/schemas/CurrentSubject'
+    EhrSyncRunApiResponse:
+      allOf:
+        - $ref: './common.yaml#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            code:
+              const: '0'
+            errorMsg:
+              const: ''
+            data:
+              $ref: '#/components/schemas/EhrSyncRun'
+    EhrSyncRunPageApiResponse:
+      allOf:
+        - $ref: './common.yaml#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            code:
+              const: '0'
+            errorMsg:
+              const: ''
+            data:
+              $ref: '#/components/schemas/EhrSyncRunPage'
+    SessionContextApiResponse:
+      allOf:
+        - $ref: './common.yaml#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            code:
+              const: '0'
+            errorMsg:
+              const: ''
+            data:
+              $ref: '#/components/schemas/SessionContextResponse'
+    EmploymentStatus:
+      type: string
+      enum: [ACTIVE, RESIGNED]
+    BindingStatus:
+      type: string
+      enum: [UNBOUND, BOUND]
+    AccountStatus:
+      type: string
+      enum: [ACTIVE, FROZEN]
+    TokenPair:
+      type: object
+      additionalProperties: false
+      required: [tokenType, accessToken, accessExpiresIn, refreshToken, refreshExpiresAt]
+      properties:
+        tokenType:
+          type: string
+          const: Bearer
+        accessToken:
+          type: string
+          writeOnly: true
+        accessExpiresIn:
+          type: integer
+          const: 900
+        refreshToken:
+          type: string
+          writeOnly: true
+        refreshExpiresAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    WechatLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [loginCode]
+      properties:
+        loginCode:
+          type: string
+          writeOnly: true
+          description: wx.login 获取的一次性登录码。
+          minLength: 1
+          maxLength: 512
+        phoneCode:
+          type: string
+          writeOnly: true
+          description: 首次绑定时 getPhoneNumber 获取的一次性手机号授权码；已有 AppID + OpenID 活动绑定时可省略，客户端不得改为提交明文手机号或 OpenID。
+          minLength: 16
+          maxLength: 512
+    AdminLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [employeeNo, password]
+      properties:
+        employeeNo:
+          type: string
+          minLength: 1
+          maxLength: 64
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 128
+    SsoExchangeRequest:
+      type: object
+      additionalProperties: false
+      required: [exchangeCode]
+      properties:
+        exchangeCode:
+          type: string
+          writeOnly: true
+          minLength: 16
+          maxLength: 512
+    RefreshTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          writeOnly: true
+          minLength: 32
+    CurrentSubject:
+      type: object
+      additionalProperties: false
+      required: [employeeId, employeeNo, displayName, organizationId, roles, permissions, dataScopes, authzVersion]
+      properties:
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        employeeNo:
+          type: string
+        displayName:
+          type: string
+        organizationId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        dataScopes:
+          type: array
+          items:
+            $ref: './common.yaml#/components/schemas/DataScope'
+        authzVersion:
+          type: integer
+          minimum: 1
+    EmployeeSummary:
+      type: object
+      additionalProperties: false
+      required: [id, employeeNo, displayName, organizationId, employmentStatus, bindingStatus, accountStatus]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        employeeNo:
+          type: string
+        displayName:
+          type: string
+        organizationId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        employmentStatus:
+          $ref: '#/components/schemas/EmploymentStatus'
+        bindingStatus:
+          $ref: '#/components/schemas/BindingStatus'
+        accountStatus:
+          $ref: '#/components/schemas/AccountStatus'
+    EmployeeDetail:
+      allOf:
+        - $ref: '#/components/schemas/EmployeeSummary'
+        - type: object
+          required: [authzVersion, createdAt, updatedAt]
+          properties:
+            authzVersion:
+              type: integer
+              minimum: 1
+            createdAt:
+              $ref: './common.yaml#/components/schemas/UtcDateTime'
+            updatedAt:
+              $ref: './common.yaml#/components/schemas/UtcDateTime'
+    EmployeePage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeSummary'
+        page:
+          $ref: './common.yaml#/components/schemas/CursorPage'
+    StatusReasonRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, confirmationToken]
+      properties:
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+        confirmationToken:
+          type: string
+          description: 高风险操作二次确认获得的一次性票据。
+          minLength: 16
+          maxLength: 512
+    OrganizationNode:
+      type: object
+      additionalProperties: false
+      required: [id, code, name, children]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        code:
+          type: string
+        name:
+          type: string
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationNode'
+    EhrSyncRunType:
+      type: string
+      enum: [FULL_RECONCILIATION]
+    EhrSyncRunStatus:
+      type: string
+      enum: [PENDING, RUNNING, SUCCEEDED, PARTIAL_SUCCEEDED, FAILED]
+    EhrSyncRun:
+      type: object
+      additionalProperties: false
+      required: [id, runType, triggerType, status, fetchedCount, insertedCount, updatedCount, resignedCount, roleInitializedCount, issueCount, createdAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        runType:
+          $ref: '#/components/schemas/EhrSyncRunType'
+        triggerType:
+          type: string
+          enum: [DEPLOYMENT, SCHEDULED, MANUAL, RETRY]
+        status:
+          $ref: '#/components/schemas/EhrSyncRunStatus'
+        fetchedCount:
+          type: integer
+          format: int64
+          minimum: 0
+        insertedCount:
+          type: integer
+          format: int64
+          minimum: 0
+        updatedCount:
+          type: integer
+          format: int64
+          minimum: 0
+        resignedCount:
+          type: integer
+          format: int64
+          minimum: 0
+        roleInitializedCount:
+          type: integer
+          format: int64
+          minimum: 0
+        issueCount:
+          type: integer
+          format: int64
+          minimum: 0
+        failureCode:
+          type: [string, 'null']
+          maxLength: 64
+        failureDigest:
+          type: [string, 'null']
+          maxLength: 500
+        startedAt:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/UtcDateTime'
+            - type: 'null'
+        completedAt:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/UtcDateTime'
+            - type: 'null'
+        createdAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    EhrSyncRunPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EhrSyncRun'
+        page:
+          $ref: './common.yaml#/components/schemas/CursorPage'
+    StartEhrSyncRequest:
+      type: object
+      additionalProperties: false
+      required: [runType, reason, confirmationToken]
+      properties:
+        runType:
+          $ref: '#/components/schemas/EhrSyncRunType'
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+        confirmationToken:
+          type: string
+          minLength: 16
+          maxLength: 512
+    Permission:
+      type: object
+      additionalProperties: false
+      required: [code, name, domain, riskLevel]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        domain:
+          type: string
+        riskLevel:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+    Role:
+      type: object
+      additionalProperties: false
+      required: [id, code, name, builtIn, protected, enabled, permissionCodes, version]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        code:
+          type: string
+        name:
+          type: string
+        builtIn:
+          type: boolean
+        protected:
+          type: boolean
+        enabled:
+          type: boolean
+        permissionCodes:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        version:
+          type: integer
+          minimum: 1
+    RoleUpsertRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, enabled, permissionCodes]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]{2,63}$'
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+        enabled:
+          type: boolean
+        permissionCodes:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        expectedVersion:
+          type: integer
+          minimum: 1
+    RoleAssignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [employeeId, roleId, dataScopes, reason, confirmationToken]
+      properties:
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        roleId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        dataScopes:
+          type: array
+          minItems: 1
+          items:
+            $ref: './common.yaml#/components/schemas/DataScope'
+        expiresAt:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/UtcDateTime'
+            - type: 'null'
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+        confirmationToken:
+          type: string
+          minLength: 16
+    RoleAssignment:
+      type: object
+      additionalProperties: false
+      required: [id, employeeId, roleId, dataScopes, status, createdAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        roleId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        dataScopes:
+          type: array
+          items:
+            $ref: './common.yaml#/components/schemas/DataScope'
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED, EXPIRED]
+        createdAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    Integration:
+      type: object
+      additionalProperties: false
+      required: [connectionCode, enabled, endpoint, credentialConfigured, updatedAt]
+      properties:
+        connectionCode:
+          type: string
+        enabled:
+          type: boolean
+        endpoint:
+          type: string
+          format: uri
+        credentialConfigured:
+          type: boolean
+        credentialMask:
+          type: [string, 'null']
+        credentialRef:
+          type: [string, 'null']
+          description: KMS/凭据服务引用，不是密钥原文。
+        updatedAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    IntegrationUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled, endpoint]
+      properties:
+        enabled:
+          type: boolean
+        endpoint:
+          type: string
+          format: uri
+        timeoutMillis:
+          type: integer
+          minimum: 100
+          maximum: 60000
+    CredentialRotateRequest:
+      type: object
+      additionalProperties: false
+      required: [credential, reason, confirmationToken]
+      properties:
+        credential:
+          type: string
+          writeOnly: true
+          minLength: 8
+          maxLength: 8192
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+        confirmationToken:
+          type: string
+          minLength: 16
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, occurredAt, actorType, module, action, result, requestId]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        occurredAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+        actorType:
+          type: string
+          enum: [EMPLOYEE, SERVICE]
+        actorEmployeeId:
+          type: [string, 'null']
+        actorRoleCodes:
+          type: array
+          items:
+            type: string
+        module:
+          type: string
+        action:
+          type: string
+        resourceType:
+          type: [string, 'null']
+        resourceId:
+          type: [string, 'null']
+        result:
+          type: string
+          enum: [SUCCESS, FAILURE]
+        requestId:
+          type: string
+        traceId:
+          type: [string, 'null']
+        reason:
+          type: [string, 'null']
+    AuditEventPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+        page:
+          $ref: './common.yaml#/components/schemas/CursorPage'
+    AuditExportRequest:
+      type: object
+      additionalProperties: false
+      required: [from, to, reason]
+      properties:
+        from:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+        to:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+        module:
+          type: [string, 'null']
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+    SessionContextRequest:
+      type: object
+      additionalProperties: false
+      required: [employeeId, sessionId, authzVersion, targetService]
+      properties:
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        sessionId:
+          type: string
+          format: uuid
+        authzVersion:
+          type: integer
+          format: int64
+          minimum: 1
+        targetService:
+          type: string
+    SessionContextResponse:
+      type: object
+      additionalProperties: false
+      required: [employeeId, organizationId, sessionId, clientType, authzVersion, roleCodes, permissions, dataScopes, amr]
+      properties:
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        organizationId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        sessionId:
+          type: string
+          format: uuid
+        clientType:
+          type: string
+          enum: [MINI_PROGRAM, ADMIN_WEB]
+        authzVersion:
+          type: integer
+          format: int64
+          minimum: 1
+        roleCodes:
+          type: array
+          items: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+        dataScopes:
+          type: array
+          items:
+            $ref: './common.yaml#/components/schemas/DataScope'
+        amr:
+          type: array
+          items: { type: string }
+    AuthorizationSnapshot:
+      type: object
+      additionalProperties: false
+      required: [employeeId, employmentStatus, accountStatus, organizationId, roleCodes, permissions, dataScopes, authzVersion]
+      properties:
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        employmentStatus:
+          $ref: '#/components/schemas/EmploymentStatus'
+        accountStatus:
+          $ref: '#/components/schemas/AccountStatus'
+        organizationId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        roleCodes:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        dataScopes:
+          type: array
+          items:
+            $ref: './common.yaml#/components/schemas/DataScope'
+        authzVersion:
+          type: integer
+          minimum: 1
+    AuditEventAppendRequest:
+      type: object
+      additionalProperties: false
+      required: [eventId, occurredAt, module, action, result, requestId]
+      properties:
+        eventId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        occurredAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+        module:
+          type: string
+        action:
+          type: string
+        resourceType:
+          type: [string, 'null']
+        resourceId:
+          type: [string, 'null']
+        result:
+          type: string
+          enum: [SUCCESS, FAILURE]
+        requestId:
+          type: string
+        traceId:
+          type: [string, 'null']
+        beforeDigest:
+          type: [string, 'null']
+        afterDigest:
+          type: [string, 'null']

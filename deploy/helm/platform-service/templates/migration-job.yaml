@@ -1,0 +1,18 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "platform-service.name" . }}-migration
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "platform-service.name" . }}
+      containers:
+        - name: flyway
+          image: {{ required "migration.image is required when migration is enabled" .Values.migration.image | quote }}
+          {{- if .Values.secretRef }}
+          envFrom: [{secretRef: {name: {{ .Values.secretRef | quote }}}}]
+          {{- end }}
+{{- end }}

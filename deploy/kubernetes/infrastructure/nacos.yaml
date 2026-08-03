@@ -1,0 +1,114 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nacos-headless
+  namespace: biel-life-camp
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {app.kubernetes.io/name: nacos}
+  ports:
+    - {name: http, port: 8848, targetPort: http}
+    - {name: grpc-client, port: 9848, targetPort: grpc-client}
+    - {name: grpc-server, port: 9849, targetPort: grpc-server}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nacos
+  namespace: biel-life-camp
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: nacos}
+  ports:
+    - {name: http, port: 8848, targetPort: http}
+    - {name: grpc-client, port: 9848, targetPort: grpc-client}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nacos-console
+  namespace: biel-life-camp
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: nacos}
+  ports:
+    - {name: console, port: 8080, targetPort: console}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nacos
+  namespace: biel-life-camp
+spec:
+  serviceName: nacos-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: {app.kubernetes.io/name: nacos}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: nacos}
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '8848'
+        prometheus.io/path: /nacos/actuator/prometheus
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext: {seccompProfile: {type: RuntimeDefault}}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app.kubernetes.io/name: nacos}
+      containers:
+        - name: nacos
+          image: boen-registry-vpc.cn-shenzhen.cr.aliyuncs.com/biel_rep/nacos@sha256:cc5a4dca5cd2e637b9efc734205fe4d820a4dcfb089f411167a87ee3acf79e6f
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: console, containerPort: 8080}
+            - {name: http, containerPort: 8848}
+            - {name: grpc-client, containerPort: 9848}
+            - {name: grpc-server, containerPort: 9849}
+          env:
+            - {name: MODE, value: cluster}
+            - {name: PREFER_HOST_MODE, value: hostname}
+            - name: NACOS_SERVERS
+              value: nacos-0.nacos-headless.biel-life-camp.svc.cluster.local:8848 nacos-1.nacos-headless.biel-life-camp.svc.cluster.local:8848 nacos-2.nacos-headless.biel-life-camp.svc.cluster.local:8848
+            - name: MEMBER_LIST
+              value: nacos-0.nacos-headless.biel-life-camp.svc.cluster.local:8848,nacos-1.nacos-headless.biel-life-camp.svc.cluster.local:8848,nacos-2.nacos-headless.biel-life-camp.svc.cluster.local:8848
+            - {name: SPRING_DATASOURCE_PLATFORM, value: mysql}
+            - {name: NACOS_AUTH_ADMIN_ENABLE, value: 'true'}
+            - {name: NACOS_AUTH_CONSOLE_ENABLE, value: 'true'}
+            - {name: NACOS_CONSOLE_PORT, value: '8080'}
+            - {name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE, value: prometheus}
+            - {name: JVM_XMS, value: 1g}
+            - {name: JVM_XMX, value: 1g}
+            - {name: JVM_XMN, value: 512m}
+          envFrom:
+            - secretRef: {name: nacos-rds-secret}
+            - secretRef: {name: nacos-auth-secret}
+          readinessProbe: {httpGet: {path: /nacos/v3/admin/core/state/readiness, port: http}, initialDelaySeconds: 30, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /nacos/v3/admin/core/state/liveness, port: http}, initialDelaySeconds: 60, periodSeconds: 15}
+          startupProbe: {httpGet: {path: /nacos/v3/admin/core/state/liveness, port: http}, failureThreshold: 60, periodSeconds: 5}
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}}
+          volumeMounts:
+            - {name: logs, mountPath: /home/nacos/logs}
+      volumes:
+        - name: logs
+          emptyDir: {}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nacos
+  namespace: biel-life-camp
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: {app.kubernetes.io/name: nacos}

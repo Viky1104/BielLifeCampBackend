@@ -1,0 +1,23 @@
+CREATE DATABASE IF NOT EXISTS system_db CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS communication_db CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS workbench_db CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS points_db CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS activity_db CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS community_db CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS mall_db CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS life_db CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS order_view_db CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS nacos_config CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS xxl_job_db CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+
+GRANT ALL PRIVILEGES ON system_db.* TO 'lifecamp'@'%';
+GRANT ALL PRIVILEGES ON communication_db.* TO 'lifecamp'@'%';
+GRANT ALL PRIVILEGES ON workbench_db.* TO 'lifecamp'@'%';
+GRANT ALL PRIVILEGES ON points_db.* TO 'lifecamp'@'%';
+GRANT ALL PRIVILEGES ON activity_db.* TO 'lifecamp'@'%';
+GRANT ALL PRIVILEGES ON community_db.* TO 'lifecamp'@'%';
+GRANT ALL PRIVILEGES ON mall_db.* TO 'lifecamp'@'%';
+GRANT ALL PRIVILEGES ON life_db.* TO 'lifecamp'@'%';
+GRANT ALL PRIVILEGES ON order_view_db.* TO 'lifecamp'@'%';
+GRANT ALL PRIVILEGES ON xxl_job_db.* TO 'lifecamp'@'%';
+FLUSH PRIVILEGES;

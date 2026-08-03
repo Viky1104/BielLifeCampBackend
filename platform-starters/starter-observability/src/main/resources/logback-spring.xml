@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  平台统一日志配置。
+
+  Spring Boot Starter 已将 Log4j API、JUL 和 Commons Logging 路由到 SLF4J，
+  本文件只保留 Logback 一个实际输出实现，避免多套日志实现重复写入。
+-->
+<configuration>
+    <!-- 复用 Spring Boot 4 的转换规则、字符集和结构化日志基础属性。 -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!-- 日志级别和结构化格式可由 application.yml、Nacos 或环境变量覆盖。 -->
+    <springProperty scope="context" name="ROOT_LOG_LEVEL"
+                    source="logging.level.root" defaultValue="INFO"/>
+    <springProperty scope="context" name="PLATFORM_LOG_LEVEL"
+                    source="logging.level.com.biel.lifecamp" defaultValue="INFO"/>
+    <springProperty scope="context" name="SPRING_LOG_LEVEL"
+                    source="logging.level.org.springframework" defaultValue="INFO"/>
+    <springProperty scope="context" name="NACOS_LOG_LEVEL"
+                    source="logging.level.com.alibaba.nacos" defaultValue="WARN"/>
+    <springProperty scope="context" name="MYBATIS_LOG_LEVEL"
+                    source="logging.level.org.mybatis" defaultValue="WARN"/>
+    <springProperty scope="context" name="APP_CONSOLE_LOG_FORMAT"
+                    source="logging.structured.format.console" defaultValue="ecs"/>
+    <springProperty scope="context" name="APP_FILE_LOG_FORMAT"
+                    source="logging.structured.format.file" defaultValue="ecs"/>
+
+    <!--
+      控制台和文件统一使用 ECS JSON，便于 Filebeat/Elasticsearch 按字段检索。
+      logging.structured.format.console/file 仍可覆盖格式。
+    -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>${CONSOLE_LOG_THRESHOLD}</level>
+        </filter>
+        <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+            <format>${APP_CONSOLE_LOG_FORMAT}</format>
+            <charset>${CONSOLE_LOG_CHARSET}</charset>
+        </encoder>
+    </appender>
+
+    <!-- 默认级别：业务 INFO，框架 INFO，Nacos/MyBatis/Netty 等高频组件 WARN。 -->
+    <logger name="com.biel.lifecamp" level="${PLATFORM_LOG_LEVEL}"/>
+    <logger name="org.springframework" level="${SPRING_LOG_LEVEL}"/>
+    <logger name="com.alibaba.nacos" level="${NACOS_LOG_LEVEL}"/>
+    <logger name="com.alibaba.cloud.nacos" level="${NACOS_LOG_LEVEL}"/>
+    <logger name="org.mybatis" level="${MYBATIS_LOG_LEVEL}"/>
+    <logger name="org.apache.ibatis" level="${MYBATIS_LOG_LEVEL}"/>
+    <logger name="io.netty" level="WARN"/>
+    <logger name="com.zaxxer.hikari" level="INFO"/>
+    <logger name="org.apache.logging.log4j" level="WARN"/>
+
+    <!--
+      文件日志按需启用，避免 ACK 只读根文件系统产生启动异常。
+      本地或挂载了可写日志卷的容器使用 file-logging Profile。
+    -->
+    <springProfile name="file-logging">
+        <property name="APP_LOG_PATH" value="${LOG_PATH:-./logs}"/>
+        <property name="LOG_FILE"
+                  value="${LOG_FILE:-${APP_LOG_PATH}/application.log}"/>
+        <property name="ERROR_LOG_FILE"
+                  value="${LOG_FILE}.error"/>
+        <property name="LOGBACK_ROLLINGPOLICY_FILE_NAME_PATTERN"
+                  value="${LOGBACK_ROLLINGPOLICY_FILE_NAME_PATTERN:-${LOG_FILE}.%d{yyyy-MM-dd}.%i.gz}"/>
+        <property name="LOGBACK_ROLLINGPOLICY_CLEAN_HISTORY_ON_START"
+                  value="${LOGBACK_ROLLINGPOLICY_CLEAN_HISTORY_ON_START:-true}"/>
+        <property name="LOGBACK_ROLLINGPOLICY_MAX_FILE_SIZE"
+                  value="${LOGBACK_ROLLINGPOLICY_MAX_FILE_SIZE:-50MB}"/>
+        <property name="LOGBACK_ROLLINGPOLICY_TOTAL_SIZE_CAP"
+                  value="${LOGBACK_ROLLINGPOLICY_TOTAL_SIZE_CAP:-5GB}"/>
+        <property name="LOGBACK_ROLLINGPOLICY_MAX_HISTORY"
+                  value="${LOGBACK_ROLLINGPOLICY_MAX_HISTORY:-30}"/>
+
+        <!-- 全量日志包含 root 允许的全部级别，按天且单文件达到上限时滚动。 -->
+        <appender name="FILE"
+                  class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>${FILE_LOG_THRESHOLD}</level>
+            </filter>
+            <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+                <format>${APP_FILE_LOG_FORMAT}</format>
+                <charset>${FILE_LOG_CHARSET}</charset>
+            </encoder>
+            <file>${LOG_FILE}</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOGBACK_ROLLINGPOLICY_FILE_NAME_PATTERN}</fileNamePattern>
+                <cleanHistoryOnStart>${LOGBACK_ROLLINGPOLICY_CLEAN_HISTORY_ON_START}</cleanHistoryOnStart>
+                <maxFileSize>${LOGBACK_ROLLINGPOLICY_MAX_FILE_SIZE}</maxFileSize>
+                <totalSizeCap>${LOGBACK_ROLLINGPOLICY_TOTAL_SIZE_CAP}</totalSizeCap>
+                <maxHistory>${LOGBACK_ROLLINGPOLICY_MAX_HISTORY}</maxHistory>
+            </rollingPolicy>
+        </appender>
+
+        <!-- ERROR 独立文件方便快速告警与故障检索，不包含 INFO/WARN。 -->
+        <appender name="ERROR_FILE"
+                  class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <filter class="ch.qos.logback.classic.filter.LevelFilter">
+                <level>ERROR</level>
+                <onMatch>ACCEPT</onMatch>
+                <onMismatch>DENY</onMismatch>
+            </filter>
+            <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+                <format>${APP_FILE_LOG_FORMAT}</format>
+                <charset>${FILE_LOG_CHARSET}</charset>
+            </encoder>
+            <file>${ERROR_LOG_FILE}</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${ERROR_LOG_FILE}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+                <cleanHistoryOnStart>${LOGBACK_ROLLINGPOLICY_CLEAN_HISTORY_ON_START}</cleanHistoryOnStart>
+                <maxFileSize>${LOGBACK_ROLLINGPOLICY_MAX_FILE_SIZE}</maxFileSize>
+                <totalSizeCap>${LOGBACK_ROLLINGPOLICY_TOTAL_SIZE_CAP}</totalSizeCap>
+                <maxHistory>${LOGBACK_ROLLINGPOLICY_MAX_HISTORY}</maxHistory>
+            </rollingPolicy>
+        </appender>
+
+        <root level="${ROOT_LOG_LEVEL}">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </root>
+    </springProfile>
+
+    <!-- 未启用文件日志时只写结构化 stdout，由 ACK Filebeat 采集。 -->
+    <springProfile name="!file-logging">
+        <root level="${ROOT_LOG_LEVEL}">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>

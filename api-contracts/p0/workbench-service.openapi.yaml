@@ -1,0 +1,419 @@
+openapi: 3.1.0
+info:
+  title: Biel Life Camp Workbench Service API
+  version: 1.0.0
+  description: P0 通用候选任务、领取、释放、裁决和源服务回执契约。
+servers:
+  - url: /
+tags:
+  - name: WorkItems
+  - name: Internal
+paths:
+  /api/workbench/v1/work-items:
+    get:
+      tags: [WorkItems]
+      operationId: listCandidateWorkItems
+      summary: listCandidateWorkItems
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Cursor'
+        - $ref: './common.yaml#/components/parameters/PageSize'
+        - name: workType
+          in: query
+          schema:
+            type: string
+            enum: [CONTENT_REVIEW, POINTS_ADJUSTMENT, MALL_REFUND]
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/WorkItemStatus'
+      responses:
+        '200':
+          description: 当前员工有候选资格或已领取的任务。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkItemPage'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+  /api/workbench/v1/work-items/{workItemId}:
+    get:
+      tags: [WorkItems]
+      operationId: getWorkItem
+      summary: getWorkItem
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/WorkItemId'
+      responses:
+        '200':
+          description: 最小必要任务证据和当前状态。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkItemDetail'
+        '404':
+          $ref: './common.yaml#/components/responses/NotFound'
+  /api/workbench/v1/work-items/{workItemId}/claim:
+    post:
+      tags: [WorkItems]
+      operationId: claimWorkItem
+      summary: claimWorkItem
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/WorkItemId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionCommand'
+      responses:
+        '200':
+          description: 领取成功；服务端已重新验证角色和数据范围。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkItemDetail'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/workbench/v1/work-items/{workItemId}/release:
+    post:
+      tags: [WorkItems]
+      operationId: releaseWorkItem
+      summary: releaseWorkItem
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/WorkItemId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseCommand'
+      responses:
+        '200':
+          description: 本人领取已释放并重新进入候选池。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkItemDetail'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/workbench/v1/work-items/{workItemId}/decisions:
+    post:
+      tags: [WorkItems]
+      operationId: decideWorkItem
+      summary: decideWorkItem
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/WorkItemId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionCommand'
+      responses:
+        '202':
+          description: 裁决事实已保存，源服务回调进入可靠任务；业务最终状态仍由源服务决定。
+          content:
+            application/json:
+              schema:
+                $ref: './common.yaml#/components/schemas/OperationAccepted'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/workbench/v1/work-items/{workItemId}/history:
+    get:
+      tags: [WorkItems]
+      operationId: getWorkItemHistory
+      summary: getWorkItemHistory
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/WorkItemId'
+      responses:
+        '200':
+          description: 追加式任务历史。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkItemHistory'
+  /internal/workbench/v1/work-items:
+    post:
+      tags: [Internal]
+      operationId: createWorkItem
+      summary: createWorkItem
+      security:
+        - InternalIdentity: []
+          ServiceMtls: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkItemCommand'
+      responses:
+        '201':
+          description: 工作项已创建或返回同一业务键的既有工作项。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkItemDetail'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /internal/workbench/v1/work-items/{workItemId}/cancel:
+    post:
+      tags: [Internal]
+      operationId: cancelWorkItem
+      summary: cancelWorkItem
+      security:
+        - InternalIdentity: []
+          ServiceMtls: []
+      parameters:
+        - $ref: '#/components/parameters/WorkItemId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceStatusCommand'
+      responses:
+        '204':
+          description: 源业务撤销后，工作项已取消。
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /internal/workbench/v1/work-items/{workItemId}/complete:
+    post:
+      tags: [Internal]
+      operationId: completeWorkItemFromSource
+      summary: completeWorkItemFromSource
+      security:
+        - InternalIdentity: []
+          ServiceMtls: []
+      parameters:
+        - $ref: '#/components/parameters/WorkItemId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceStatusCommand'
+      responses:
+        '204':
+          description: 源服务已处理裁决，工作项进入完成态。
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+components:
+  securitySchemes:
+    ExternalBearer:
+      $ref: './common.yaml#/components/securitySchemes/ExternalBearer'
+    InternalIdentity:
+      $ref: './common.yaml#/components/securitySchemes/InternalIdentity'
+    ServiceMtls:
+      $ref: './common.yaml#/components/securitySchemes/ServiceMtls'
+  parameters:
+    WorkItemId:
+      name: workItemId
+      in: path
+      required: true
+      schema:
+        $ref: './common.yaml#/components/schemas/DistributedId'
+  schemas:
+    WorkItemStatus:
+      type: string
+      enum: [PENDING, CLAIMED, DECIDED, COMPLETED, CANCELLED, EXPIRED]
+    DecisionType:
+      type: string
+      enum: [APPROVED, REJECTED]
+    WorkItemSummary:
+      type: object
+      additionalProperties: false
+      required: [id, workType, sourceService, businessId, title, status, version, createdAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        workType:
+          type: string
+          enum: [CONTENT_REVIEW, POINTS_ADJUSTMENT, MALL_REFUND]
+        sourceService:
+          type: string
+          enum: [community-service, points-service, mall-service]
+        businessId:
+          type: string
+          maxLength: 128
+        title:
+          type: string
+          maxLength: 200
+        status:
+          $ref: '#/components/schemas/WorkItemStatus'
+        claimantEmployeeId:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/DistributedId'
+            - type: 'null'
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    WorkItemDetail:
+      allOf:
+        - $ref: '#/components/schemas/WorkItemSummary'
+        - type: object
+          required: [requiredPermission, evidence, updatedAt]
+          properties:
+            requiredPermission:
+              type: string
+            evidence:
+              type: object
+              description: 源服务提供并按任务类型固定 Schema 的最小必要证据；不得包含无关聊天或个人敏感数据。
+            decision:
+              oneOf:
+                - $ref: '#/components/schemas/DecisionRecord'
+                - type: 'null'
+            updatedAt:
+              $ref: './common.yaml#/components/schemas/UtcDateTime'
+    WorkItemPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkItemSummary'
+        page:
+          $ref: './common.yaml#/components/schemas/CursorPage'
+    VersionCommand:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 1
+    ReleaseCommand:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, reason]
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 500
+    DecisionCommand:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, decision, reason, confirmationToken]
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 1
+        decision:
+          $ref: '#/components/schemas/DecisionType'
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 1000
+        confirmationToken:
+          type: string
+          minLength: 16
+          maxLength: 512
+    DecisionRecord:
+      type: object
+      additionalProperties: false
+      required: [decision, decidedBy, reason, decidedAt]
+      properties:
+        decision:
+          $ref: '#/components/schemas/DecisionType'
+        decidedBy:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        reason:
+          type: string
+        decidedAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    WorkItemHistory:
+      type: object
+      additionalProperties: false
+      required: [id, eventType, actorType, occurredAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        eventType:
+          type: string
+          enum: [CREATED, CLAIMED, RELEASED, DECIDED, SOURCE_COMPLETED, CANCELLED, EXPIRED]
+        actorType:
+          type: string
+          enum: [EMPLOYEE, SERVICE, SYSTEM]
+        actorId:
+          type: [string, 'null']
+        reason:
+          type: [string, 'null']
+        occurredAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    CreateWorkItemCommand:
+      type: object
+      additionalProperties: false
+      required: [workType, sourceService, businessId, title, requiredPermission, candidateScopes, evidence, evidenceDigest]
+      properties:
+        workType:
+          type: string
+          enum: [CONTENT_REVIEW, POINTS_ADJUSTMENT, MALL_REFUND]
+        sourceService:
+          type: string
+          enum: [community-service, points-service, mall-service]
+        businessId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        requiredPermission:
+          type: string
+        candidateScopes:
+          type: array
+          items:
+            $ref: './common.yaml#/components/schemas/DataScope'
+        evidence:
+          type: object
+        evidenceDigest:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        expiresAt:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/UtcDateTime'
+            - type: 'null'
+    SourceStatusCommand:
+      type: object
+      additionalProperties: false
+      required: [sourceBusinessStatus, sourceVersion]
+      properties:
+        sourceBusinessStatus:
+          type: string
+          maxLength: 64
+        sourceVersion:
+          type: integer
+          minimum: 1
+        reason:
+          type: [string, 'null']
+          maxLength: 500

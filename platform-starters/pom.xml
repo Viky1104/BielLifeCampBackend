@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.biel.lifecamp</groupId>
+        <artifactId>biel-life-camp-backend</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>platform-starters</artifactId>
+    <packaging>pom</packaging>
+    <modules>
+        <module>starter-web</module>
+        <module>starter-security-context</module>
+        <module>starter-observability</module>
+        <module>starter-data-mybatis</module>
+        <module>starter-governance</module>
+        <module>starter-task-lease</module>
+        <module>starter-test</module>
+    </modules>
+</project>

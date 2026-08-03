@@ -1,0 +1,14 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:system;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  flyway:
+    enabled: true
+mybatis:
+  mapper-locations: classpath*:/mapper/**/*.xml
+platform:
+  auth:
+    enabled: false
+  security-context:
+    enabled: false

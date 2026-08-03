@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.biel.lifecamp.system.dao.AuthTestMapper">
+    <delete id="deleteOperationAudits">DELETE FROM sys_operation_audit</delete>
+    <delete id="deleteRefreshTokens">DELETE FROM sys_refresh_token</delete>
+    <delete id="deleteUserSessions">DELETE FROM sys_user_session</delete>
+    <delete id="deleteRoleAssignments">DELETE FROM sys_role_assignment</delete>
+    <delete id="deleteExternalIdentities">DELETE FROM sys_external_identity</delete>
+    <delete id="deleteLocalCredentials">DELETE FROM sys_local_credential</delete>
+    <delete id="deleteEmployees">DELETE FROM sys_employee</delete>
+
+    <update id="completeInitialEhrSync">
+        UPDATE sys_integration_state
+        SET initial_sync_completed = TRUE
+        WHERE connection_code = 'EHR'
+    </update>
+
+    <insert id="insertEmployee">
+        INSERT INTO sys_employee
+            (id, ehr_person_id, employee_no, display_name, mobile_hash,
+             primary_org_id, employment_status, binding_status,
+             account_status, authz_version)
+        VALUES
+            (#{id}, #{ehrPersonId}, #{employeeNo}, #{displayName}, #{mobileHash},
+             #{organizationId}, 'ACTIVE', 'UNBOUND', 'ACTIVE', 1)
+    </insert>
+
+    <insert id="insertLocalCredential">
+        INSERT INTO sys_local_credential
+            (employee_id, password_hash, status, must_change_password)
+        VALUES
+            (#{employeeId}, #{passwordHash}, 'ACTIVE', FALSE)
+    </insert>
+
+    <select id="selectLatestSessionClientType" resultType="java.lang.String">
+        SELECT client_type
+        FROM sys_user_session
+        ORDER BY created_at DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectLatestSessionAuthMethod" resultType="java.lang.String">
+        SELECT auth_method
+        FROM sys_user_session
+        ORDER BY created_at DESC
+        LIMIT 1
+    </select>
+
+    <select id="countExternalIdentities" resultType="int">
+        SELECT COUNT(*) FROM sys_external_identity
+    </select>
+
+    <select id="countEncryptedProviderSubjects" resultType="int">
+        SELECT COUNT(*)
+        FROM sys_external_identity
+        WHERE provider_subject_ciphertext IS NOT NULL
+    </select>
+
+    <select id="countOperationAuditsByAction" resultType="int">
+        SELECT COUNT(*) FROM sys_operation_audit WHERE action = #{action}
+    </select>
+
+    <select id="countRevokedSessions" resultType="int">
+        SELECT COUNT(*) FROM sys_user_session WHERE status = 'REVOKED'
+    </select>
+
+    <select id="countEmployees" resultType="int">
+        SELECT COUNT(*) FROM sys_employee
+    </select>
+</mapper>

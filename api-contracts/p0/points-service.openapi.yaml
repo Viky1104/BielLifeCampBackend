@@ -1,0 +1,557 @@
+openapi: 3.1.0
+info:
+  title: Biel Life Camp Points Service API
+  version: 1.0.0
+  description: P0 积分账户、不可变账本、签到、人工调整和商城记账契约。
+servers:
+  - url: /
+tags:
+  - name: EmployeePoints
+  - name: PointsAdministration
+  - name: Internal
+paths:
+  /api/points/v1/accounts/me:
+    get:
+      tags: [EmployeePoints]
+      operationId: getMyPointsAccount
+      summary: getMyPointsAccount
+      security:
+        - ExternalBearer: []
+      responses:
+        '200':
+          description: 本人积分账户。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsAccount'
+        '404':
+          $ref: './common.yaml#/components/responses/NotFound'
+  /api/points/v1/ledger/me:
+    get:
+      tags: [EmployeePoints]
+      operationId: listMyPointsLedger
+      summary: listMyPointsLedger
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Cursor'
+        - $ref: './common.yaml#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 本人不可变积分流水。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerPage'
+  /api/points/v1/check-ins:
+    post:
+      tags: [EmployeePoints]
+      operationId: checkInForPoints
+      summary: checkInForPoints
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: 当日签到成功；同一员工同一业务日只记一次积分。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInResult'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/points/v1/admin/accounts/{employeeId}:
+    get:
+      tags: [PointsAdministration]
+      operationId: getEmployeePointsAccount
+      summary: getEmployeePointsAccount
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/EmployeeId'
+      responses:
+        '200':
+          description: 数据范围内的员工积分账户。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsAccount'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+  /api/points/v1/admin/accounts/{employeeId}/ledger:
+    get:
+      tags: [PointsAdministration]
+      operationId: listEmployeePointsLedger
+      summary: listEmployeePointsLedger
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/EmployeeId'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+        - $ref: './common.yaml#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 数据范围内的员工积分流水。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerPage'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+  /api/points/v1/admin/adjustments:
+    post:
+      tags: [PointsAdministration]
+      operationId: createPointsAdjustment
+      summary: createPointsAdjustment
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAdjustmentRequest'
+      responses:
+        '202':
+          description: 调整申请和工作台审批任务已创建，尚未记账。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsAdjustment'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/points/v1/admin/adjustments/{adjustmentId}:
+    get:
+      tags: [PointsAdministration]
+      operationId: getPointsAdjustment
+      summary: getPointsAdjustment
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/AdjustmentId'
+      responses:
+        '200':
+          description: 调整申请、审批和记账状态。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsAdjustment'
+        '404':
+          $ref: './common.yaml#/components/responses/NotFound'
+  /api/points/v1/rules/current:
+    get:
+      tags: [EmployeePoints]
+      operationId: getCurrentPointsRules
+      summary: getCurrentPointsRules
+      security:
+        - ExternalBearer: []
+      responses:
+        '200':
+          description: 当前生效规则的只读摘要。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PointsRule'
+  /api/points/v1/admin/rules:
+    post:
+      tags: [PointsAdministration]
+      operationId: createPointsRuleVersion
+      summary: createPointsRuleVersion
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePointsRuleRequest'
+      responses:
+        '201':
+          description: 新规则版本已创建；历史账本不重算。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsRule'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /internal/points/v1/operations:
+    post:
+      tags: [Internal]
+      operationId: executePointsOperation
+      summary: executePointsOperation
+      security:
+        - InternalIdentity: []
+          ServiceMtls: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PointsOperationCommand'
+      responses:
+        '201':
+          description: 积分入账、扣减或冲正已完成；重复业务键返回原结果。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsOperationResult'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /internal/points/v1/operations/{businessType}/{businessId}:
+    get:
+      tags: [Internal]
+      operationId: getPointsOperationByBusinessKey
+      summary: getPointsOperationByBusinessKey
+      security:
+        - InternalIdentity: []
+          ServiceMtls: []
+      parameters:
+        - name: businessType
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: businessId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: 业务键对应的记账结果。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsOperationResult'
+        '404':
+          $ref: './common.yaml#/components/responses/NotFound'
+  /internal/points/v1/adjustments/{adjustmentId}/decisions:
+    post:
+      tags: [Internal]
+      operationId: applyPointsAdjustmentDecision
+      summary: applyPointsAdjustmentDecision
+      security:
+        - InternalIdentity: []
+          ServiceMtls: []
+      parameters:
+        - $ref: '#/components/parameters/AdjustmentId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdjustmentDecisionCommand'
+      responses:
+        '200':
+          description: 裁决已应用；通过时由 points-service 原子记账并关闭业务状态。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsAdjustment'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+components:
+  securitySchemes:
+    ExternalBearer:
+      $ref: './common.yaml#/components/securitySchemes/ExternalBearer'
+    InternalIdentity:
+      $ref: './common.yaml#/components/securitySchemes/InternalIdentity'
+    ServiceMtls:
+      $ref: './common.yaml#/components/securitySchemes/ServiceMtls'
+  parameters:
+    EmployeeId:
+      name: employeeId
+      in: path
+      required: true
+      schema:
+        $ref: './common.yaml#/components/schemas/DistributedId'
+    AdjustmentId:
+      name: adjustmentId
+      in: path
+      required: true
+      schema:
+        $ref: './common.yaml#/components/schemas/DistributedId'
+  schemas:
+    PointsAccount:
+      type: object
+      additionalProperties: false
+      required: [id, employeeId, balance, status, version, updatedAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        balance:
+          type: integer
+          format: int64
+          minimum: 0
+        status:
+          type: string
+          enum: [ACTIVE, FROZEN, CLOSED]
+        version:
+          type: integer
+          minimum: 1
+        updatedAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    LedgerEntry:
+      type: object
+      additionalProperties: false
+      required: [id, accountId, direction, amount, balanceAfter, businessType, businessId, occurredAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        accountId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        direction:
+          type: string
+          enum: [CREDIT, DEBIT]
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        balanceAfter:
+          type: integer
+          format: int64
+          minimum: 0
+        businessType:
+          type: string
+          maxLength: 64
+        businessId:
+          type: string
+          maxLength: 128
+        reversalOfLedgerId:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/DistributedId'
+            - type: 'null'
+        description:
+          type: string
+          maxLength: 500
+        occurredAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    LedgerPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerEntry'
+        page:
+          $ref: './common.yaml#/components/schemas/CursorPage'
+    CheckInResult:
+      type: object
+      additionalProperties: false
+      required: [businessDate, awardedPoints, consecutiveDays, ledgerEntryId]
+      properties:
+        businessDate:
+          type: string
+          format: date
+        awardedPoints:
+          type: integer
+          minimum: 1
+        consecutiveDays:
+          type: integer
+          minimum: 1
+        ledgerEntryId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+    CreateAdjustmentRequest:
+      type: object
+      additionalProperties: false
+      required: [employeeId, direction, amount, reason, evidenceRefs, confirmationToken]
+      properties:
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        direction:
+          type: string
+          enum: [CREDIT, DEBIT]
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 1000
+        evidenceRefs:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 512
+        confirmationToken:
+          type: string
+          minLength: 16
+    AdjustmentStatus:
+      type: string
+      enum: [PENDING_APPROVAL, APPROVED, REJECTED, POSTED, FAILED]
+    PointsAdjustment:
+      type: object
+      additionalProperties: false
+      required: [id, employeeId, direction, amount, reason, requesterEmployeeId, status, version, createdAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        direction:
+          type: string
+          enum: [CREDIT, DEBIT]
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        reason:
+          type: string
+        requesterEmployeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        approverEmployeeId:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/DistributedId'
+            - type: 'null'
+        workItemId:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/DistributedId'
+            - type: 'null'
+        ledgerEntryId:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/DistributedId'
+            - type: 'null'
+        status:
+          $ref: '#/components/schemas/AdjustmentStatus'
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    PointsRule:
+      type: object
+      additionalProperties: false
+      required: [id, ruleCode, version, eventType, points, effectiveFrom, status]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        ruleCode:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        eventType:
+          type: string
+        points:
+          type: integer
+        effectiveFrom:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+        effectiveTo:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/UtcDateTime'
+            - type: 'null'
+        status:
+          type: string
+          enum: [DRAFT, ACTIVE, RETIRED]
+    CreatePointsRuleRequest:
+      type: object
+      additionalProperties: false
+      required: [ruleCode, eventType, points, effectiveFrom, reason, confirmationToken]
+      properties:
+        ruleCode:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]{2,63}$'
+        eventType:
+          type: string
+          maxLength: 64
+        points:
+          type: integer
+        effectiveFrom:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+        effectiveTo:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/UtcDateTime'
+            - type: 'null'
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+        confirmationToken:
+          type: string
+          minLength: 16
+    PointsOperationCommand:
+      type: object
+      additionalProperties: false
+      required: [employeeId, operationType, amount, businessType, businessId, description]
+      properties:
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        operationType:
+          type: string
+          enum: [CREDIT, DEBIT, REVERSE]
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        businessType:
+          type: string
+          maxLength: 64
+        businessId:
+          type: string
+          maxLength: 128
+        reverseBusinessId:
+          type: [string, 'null']
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 500
+    PointsOperationResult:
+      type: object
+      additionalProperties: false
+      required: [operationId, employeeId, businessType, businessId, status, balanceAfter, ledgerEntryId]
+      properties:
+        operationId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        businessType:
+          type: string
+        businessId:
+          type: string
+        status:
+          type: string
+          enum: [POSTED]
+        balanceAfter:
+          type: integer
+          format: int64
+          minimum: 0
+        ledgerEntryId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+    AdjustmentDecisionCommand:
+      type: object
+      additionalProperties: false
+      required: [workItemId, decision, decidedBy, reason, decidedAt]
+      properties:
+        workItemId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        decision:
+          type: string
+          enum: [APPROVED, REJECTED]
+        decidedBy:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 1000
+        decidedAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'

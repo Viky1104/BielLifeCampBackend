@@ -1,0 +1,62 @@
+spring:
+  application:
+    name: workbench-service
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
+      timeout: ${REDIS_COMMAND_TIMEOUT:2s}
+      client-name: ${spring.application.name}
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/workbench_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC}
+    username: ${DB_USERNAME:lifecamp}
+    password: ${DB_PASSWORD:}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:false}
+  cloud:
+    nacos:
+      discovery:
+        enabled: ${NACOS_ENABLED:false}
+    sentinel:
+      enabled: ${SENTINEL_ENABLED:false}
+server:
+  port: ${SERVER_PORT:8083}
+  shutdown: graceful
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+logging:
+  structured:
+    format:
+      console: ecs
+platform:
+  security-context:
+    enabled: ${INTERNAL_IDENTITY_ENABLED:false}
+    issuer: ${INTERNAL_IDENTITY_ISSUER:biel-life-camp-gateway}
+    audience: ${spring.application.name}
+    public-key-location: ${INTERNAL_IDENTITY_PUBLIC_KEY:}
+    authorization-cache:
+      enabled: ${AUTHORIZATION_CACHE_ENABLED:false}
+      key-prefix: ${AUTHORIZATION_CACHE_KEY_PREFIX:biel:security:authorization:v1}
+      version-key-prefix: ${AUTHORIZATION_VERSION_KEY_PREFIX:biel:security:authz-version:v1}
+      ttl: ${AUTHORIZATION_CACHE_TTL:15m}
+      version-ttl: ${AUTHORIZATION_VERSION_TTL:5m}
+xxl:
+  job:
+    enabled: ${XXL_JOB_ENABLED:false}
+    admin-addresses: ${XXL_JOB_ADMIN_ADDRESSES:}
+    access-token: ${XXL_JOB_ACCESS_TOKEN:}
+    app-name: ${spring.application.name}

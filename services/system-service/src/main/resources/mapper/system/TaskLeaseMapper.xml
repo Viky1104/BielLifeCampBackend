@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.biel.lifecamp.system.dao.TaskLeaseMapper">
+    <resultMap id="taskLeaseResultMap"
+               type="com.biel.lifecamp.starter.task.TaskLease">
+        <constructor>
+            <idArg column="task_id" javaType="java.lang.String"/>
+            <arg column="task_type" javaType="java.lang.String"/>
+            <arg column="idempotency_key" javaType="java.lang.String"/>
+            <arg column="attempt" javaType="_int"/>
+            <arg column="lease_expires_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <insert id="insertLeaseIfAbsent">
+        INSERT IGNORE INTO sys_task_lease
+            (task_type, task_id, idempotency_key, attempt,
+             lease_expires_at, status, updated_at)
+        VALUES
+            (#{taskType}, #{taskId}, #{idempotencyKey}, 1,
+             #{leaseExpiresAt}, 'RUNNING', #{now})
+    </insert>
+
+    <update id="takeExpiredLease">
+        UPDATE sys_task_lease
+        SET task_id = #{taskId},
+            idempotency_key = #{idempotencyKey},
+            attempt = attempt + 1,
+            lease_expires_at = #{leaseExpiresAt},
+            status = 'RUNNING',
+            failure_digest = NULL,
+            updated_at = #{now}
+        WHERE task_type = #{taskType}
+          AND lease_expires_at &lt;= #{now}
+    </update>
+
+    <select id="selectLease" resultMap="taskLeaseResultMap">
+        SELECT task_id, task_type, idempotency_key, attempt, lease_expires_at
+        FROM sys_task_lease
+        WHERE task_type = #{taskType}
+    </select>
+
+    <update id="markSucceeded">
+        UPDATE sys_task_lease
+        SET status = 'SUCCEEDED', lease_expires_at = #{now}, updated_at = #{now}
+        WHERE task_type = #{lease.taskType} AND task_id = #{lease.taskId}
+    </update>
+
+    <update id="markRetry">
+        UPDATE sys_task_lease
+        SET status = 'RETRY', failure_digest = #{failureDigest},
+            lease_expires_at = #{leaseExpiresAt}, updated_at = #{now}
+        WHERE task_type = #{lease.taskType} AND task_id = #{lease.taskId}
+    </update>
+
+    <update id="markFailedManual">
+        UPDATE sys_task_lease
+        SET status = 'FAILED_MANUAL', failure_digest = #{failureDigest},
+            lease_expires_at = #{now}, updated_at = #{now}
+        WHERE task_type = #{lease.taskType} AND task_id = #{lease.taskId}
+    </update>
+</mapper>

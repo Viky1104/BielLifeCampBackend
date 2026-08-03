@@ -1,0 +1,106 @@
+spring:
+  application:
+    name: system-service
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
+      timeout: ${REDIS_COMMAND_TIMEOUT:2s}
+      client-name: ${spring.application.name}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:false}
+  cloud:
+    nacos:
+      discovery:
+        enabled: ${NACOS_ENABLED:false}
+    sentinel:
+      enabled: ${SENTINEL_ENABLED:false}
+# Gateway 聚合文档只发布外部 API；内部服务接口不暴露到 Knife4j 调试页面。
+springdoc:
+  paths-to-match: /api/**
+mybatis:
+  mapper-locations: classpath*:/mapper/**/*.xml
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+logging:
+  structured:
+    format:
+      console: ecs
+platform:
+  ehr:
+    enabled: ${EHR_SYNC_ENABLED:false}
+    url: ${EHR_URL:http://esb.biel.com/api/esb/EHR_GetData}
+    source-system: ${EHR_SOURCE_SYSTEM:WeChat}
+    target-system: ${EHR_TARGET_SYSTEM:EHR-Micro}
+    service-name: ${EHR_SERVICE_NAME:ehr-micro-getpsninfo}
+    route-id: ${EHR_ROUTE_ID:HZ}
+    auth: ${EHR_ESB_AUTH:}
+    full-since: ${EHR_FULL_SINCE:2000-01-01 00:00:00}
+    page-size: ${EHR_PAGE_SIZE:1000}
+    max-pages: ${EHR_MAX_PAGES:10000}
+    page-concurrency: ${EHR_PAGE_CONCURRENCY:4}
+    max-records: ${EHR_MAX_RECORDS:200000}
+    persistence-batch-size: ${EHR_PERSISTENCE_BATCH_SIZE:500}
+    connect-timeout: ${EHR_CONNECT_TIMEOUT:5s}
+    read-timeout: ${EHR_READ_TIMEOUT:30s}
+  security-context:
+    enabled: ${INTERNAL_IDENTITY_ENABLED:false}
+    issuer: ${INTERNAL_IDENTITY_ISSUER:biel-life-camp-gateway}
+    audience: ${spring.application.name}
+    public-key-location: ${INTERNAL_IDENTITY_PUBLIC_KEY:}
+    authorization-cache:
+      enabled: ${AUTHORIZATION_CACHE_ENABLED:false}
+      key-prefix: ${AUTHORIZATION_CACHE_KEY_PREFIX:biel:security:authorization:v1}
+      version-key-prefix: ${AUTHORIZATION_VERSION_KEY_PREFIX:biel:security:authz-version:v1}
+      ttl: ${AUTHORIZATION_CACHE_TTL:15m}
+      version-ttl: ${AUTHORIZATION_VERSION_TTL:5m}
+  auth:
+    enabled: ${AUTH_ENABLED:true}
+    issuer: ${AUTH_ISSUER:biel-life-camp}
+    audience: ${AUTH_AUDIENCE:biel-life-camp-gateway}
+    key-id: ${AUTH_KEY_ID:change-me}
+    private-key-location: ${AUTH_PRIVATE_KEY:file:D:/DevelopEnviroment/keys/biel-life-camp/auth-private.pem}
+    public-key-location: ${AUTH_PUBLIC_KEY:file:D:/DevelopEnviroment/keys/biel-life-camp/auth-public.pem}
+    allow-ephemeral-keys: ${AUTH_ALLOW_EPHEMERAL_KEYS:false}
+    identifier-pepper: ${AUTH_IDENTIFIER_PEPPER:}
+    identity-encryption-key: ${AUTH_IDENTITY_ENCRYPTION_KEY:}
+    token-pepper: ${AUTH_TOKEN_PEPPER:}
+    ehr-require-initial-sync: ${AUTH_EHR_REQUIRE_INITIAL_SYNC:true}
+    gateway-service-token: ${AUTH_GATEWAY_SERVICE_TOKEN:}
+    admin-password:
+      enabled: ${AUTH_ADMIN_PASSWORD_ENABLED:true}
+      rate-limit-enabled: ${AUTH_ADMIN_PASSWORD_RATE_LIMIT_ENABLED:true}
+      max-attempts: ${AUTH_ADMIN_PASSWORD_MAX_ATTEMPTS:5}
+      window: ${AUTH_ADMIN_PASSWORD_WINDOW:15m}
+    session-cache:
+      enabled: ${AUTH_REDIS_SESSION_ENABLED:false}
+      key-prefix: ${AUTH_REDIS_SESSION_KEY_PREFIX:biel:auth:session:v1}
+      redis-touch-interval: ${AUTH_REDIS_TOUCH_INTERVAL:1m}
+      database-touch-interval: ${AUTH_DATABASE_TOUCH_INTERVAL:5m}
+  wechat:
+    app-id: ${WECHAT_APP_ID:}
+    app-secret: ${WECHAT_APP_SECRET:}
+    api-base-url: ${WECHAT_API_BASE_URL:https://api.weixin.qq.com}
+xxl:
+  job:
+    enabled: ${XXL_JOB_ENABLED:false}
+    admin-addresses: ${XXL_JOB_ADMIN_ADDRESSES:}
+    access-token: ${XXL_JOB_ACCESS_TOKEN:}
+    app-name: ${spring.application.name}

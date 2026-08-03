@@ -1,0 +1,725 @@
+openapi: 3.1.0
+info:
+  title: Biel Life Camp Mall Service API
+  version: 1.0.0
+  description: P0 商品、SKU、库存、积分兑换订单、核销和退款契约。
+servers:
+  - url: /
+tags:
+  - name: Catalog
+  - name: Orders
+  - name: MallAdministration
+  - name: Verification
+  - name: Internal
+paths:
+  /api/mall/v1/products:
+    get:
+      tags: [Catalog]
+      operationId: listPublishedProducts
+      summary: listPublishedProducts
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Cursor'
+        - $ref: './common.yaml#/components/parameters/PageSize'
+        - name: keyword
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: 当前可兑换商品。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductPage'
+  /api/mall/v1/products/{productId}:
+    get:
+      tags: [Catalog]
+      operationId: getPublishedProduct
+      summary: getPublishedProduct
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: 已发布商品和可兑换 SKU。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+        '404':
+          $ref: './common.yaml#/components/responses/NotFound'
+  /api/mall/v1/orders:
+    post:
+      tags: [Orders]
+      operationId: createExchangeOrder
+      summary: createExchangeOrder
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExchangeOrderRequest'
+      responses:
+        '201':
+          description: 库存预占和积分扣减完成后创建订单；失败必须释放预占或进入可恢复任务。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeOrder'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/mall/v1/orders/{orderId}:
+    get:
+      tags: [Orders]
+      operationId: getExchangeOrder
+      summary: getExchangeOrder
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: 本人订单或管理数据范围内订单。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeOrder'
+        '404':
+          $ref: './common.yaml#/components/responses/NotFound'
+  /api/mall/v1/orders/{orderId}/cancel:
+    post:
+      tags: [Orders]
+      operationId: cancelExchangeOrder
+      summary: cancelExchangeOrder
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderVersionReasonCommand'
+      responses:
+        '200':
+          description: 未核销订单取消成功；积分返还通过幂等内部记账完成。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeOrder'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/mall/v1/orders/{orderId}/refunds:
+    post:
+      tags: [Orders]
+      operationId: createMallRefund
+      summary: createMallRefund
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRefundRequest'
+      responses:
+        '202':
+          description: 退款申请及需要时的工作台审批任务已创建。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MallRefund'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/mall/v1/admin/products:
+    post:
+      tags: [MallAdministration]
+      operationId: createProduct
+      summary: createProduct
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductUpsertRequest'
+      responses:
+        '201':
+          description: 草稿商品已创建。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+  /api/mall/v1/admin/products/{productId}:
+    put:
+      tags: [MallAdministration]
+      operationId: updateProduct
+      summary: updateProduct
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductUpsertRequest'
+      responses:
+        '200':
+          description: 商品已按乐观版本更新。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/mall/v1/admin/products/{productId}/publication:
+    post:
+      tags: [MallAdministration]
+      operationId: changeProductPublication
+      summary: changeProductPublication
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicationCommand'
+      responses:
+        '200':
+          description: 商品发布状态已更新。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/mall/v1/admin/inventory:
+    get:
+      tags: [MallAdministration]
+      operationId: listInventory
+      summary: listInventory
+      security:
+        - ExternalBearer: []
+      parameters:
+        - name: storeId
+          in: query
+          required: true
+          schema:
+            $ref: './common.yaml#/components/schemas/DistributedId'
+        - name: skuId
+          in: query
+          schema:
+            $ref: './common.yaml#/components/schemas/DistributedId'
+      responses:
+        '200':
+          description: 门店和 SKU 数据范围内的库存。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Inventory'
+  /api/mall/v1/admin/inventory-adjustments:
+    post:
+      tags: [MallAdministration]
+      operationId: adjustInventory
+      summary: adjustInventory
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InventoryAdjustmentRequest'
+      responses:
+        '201':
+          description: 库存调整事实已追加，库存已条件更新。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Inventory'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /api/mall/v1/verifications:
+    post:
+      tags: [Verification]
+      operationId: verifyExchangeOrder
+      summary: verifyExchangeOrder
+      security:
+        - ExternalBearer: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyOrderRequest'
+      responses:
+        '201':
+          description: 在门店/SKU 范围和订单状态复核后完成一次性核销。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationRecord'
+        '403':
+          $ref: './common.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+  /internal/mall/v1/refunds/{refundId}/decisions:
+    post:
+      tags: [Internal]
+      operationId: applyMallRefundDecision
+      summary: applyMallRefundDecision
+      security:
+        - InternalIdentity: []
+          ServiceMtls: []
+      parameters:
+        - $ref: '#/components/parameters/RefundId'
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundDecisionCommand'
+      responses:
+        '200':
+          description: 裁决已应用；通过时由 mall-service 驱动积分返还并关闭退款状态。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MallRefund'
+        '409':
+          $ref: './common.yaml#/components/responses/Conflict'
+components:
+  securitySchemes:
+    ExternalBearer:
+      $ref: './common.yaml#/components/securitySchemes/ExternalBearer'
+    InternalIdentity:
+      $ref: './common.yaml#/components/securitySchemes/InternalIdentity'
+    ServiceMtls:
+      $ref: './common.yaml#/components/securitySchemes/ServiceMtls'
+  parameters:
+    ProductId:
+      name: productId
+      in: path
+      required: true
+      schema:
+        $ref: './common.yaml#/components/schemas/DistributedId'
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        $ref: './common.yaml#/components/schemas/DistributedId'
+    RefundId:
+      name: refundId
+      in: path
+      required: true
+      schema:
+        $ref: './common.yaml#/components/schemas/DistributedId'
+  schemas:
+    ProductStatus:
+      type: string
+      enum: [DRAFT, PUBLISHED, UNPUBLISHED]
+    ProductSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name, coverImageUrl, minimumPoints, status]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        name:
+          type: string
+          maxLength: 200
+        coverImageUrl:
+          type: string
+          format: uri
+        minimumPoints:
+          type: integer
+          format: int64
+          minimum: 1
+        status:
+          $ref: '#/components/schemas/ProductStatus'
+    Sku:
+      type: object
+      additionalProperties: false
+      required: [id, productId, skuCode, name, pointsPrice, enabled, version]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        productId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        skuCode:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          maxLength: 200
+        pointsPrice:
+          type: integer
+          format: int64
+          minimum: 1
+        enabled:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+    ProductDetail:
+      allOf:
+        - $ref: '#/components/schemas/ProductSummary'
+        - type: object
+          required: [description, skus, version, updatedAt]
+          properties:
+            description:
+              type: string
+              maxLength: 10000
+            skus:
+              type: array
+              minItems: 1
+              items:
+                $ref: '#/components/schemas/Sku'
+            version:
+              type: integer
+              minimum: 1
+            updatedAt:
+              $ref: './common.yaml#/components/schemas/UtcDateTime'
+    ProductPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductSummary'
+        page:
+          $ref: './common.yaml#/components/schemas/CursorPage'
+    ProductUpsertRequest:
+      type: object
+      additionalProperties: false
+      required: [name, description, coverFileId, skus]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 10000
+        coverFileId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        skus:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/SkuUpsertRequest'
+        expectedVersion:
+          type: [integer, 'null']
+          minimum: 1
+    SkuUpsertRequest:
+      type: object
+      additionalProperties: false
+      required: [skuCode, name, pointsPrice, enabled]
+      properties:
+        id:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/DistributedId'
+            - type: 'null'
+        skuCode:
+          type: string
+          minLength: 1
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        pointsPrice:
+          type: integer
+          format: int64
+          minimum: 1
+        enabled:
+          type: boolean
+        expectedVersion:
+          type: [integer, 'null']
+          minimum: 1
+    PublicationCommand:
+      type: object
+      additionalProperties: false
+      required: [publish, expectedVersion, reason]
+      properties:
+        publish:
+          type: boolean
+        expectedVersion:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 500
+    Inventory:
+      type: object
+      additionalProperties: false
+      required: [id, storeId, skuId, onHand, reserved, available, version, updatedAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        storeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        skuId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        onHand:
+          type: integer
+          format: int64
+          minimum: 0
+        reserved:
+          type: integer
+          format: int64
+          minimum: 0
+        available:
+          type: integer
+          format: int64
+          minimum: 0
+        version:
+          type: integer
+          minimum: 1
+        updatedAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    InventoryAdjustmentRequest:
+      type: object
+      additionalProperties: false
+      required: [storeId, skuId, quantityDelta, expectedVersion, reason, confirmationToken]
+      properties:
+        storeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        skuId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        quantityDelta:
+          type: integer
+          format: int64
+          not:
+            const: 0
+        expectedVersion:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+        confirmationToken:
+          type: string
+          minLength: 16
+    CreateExchangeOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [storeId, items]
+      properties:
+        storeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [skuId, quantity]
+            properties:
+              skuId:
+                $ref: './common.yaml#/components/schemas/DistributedId'
+              quantity:
+                type: integer
+                minimum: 1
+                maximum: 100
+    ExchangeOrder:
+      type: object
+      additionalProperties: false
+      required: [id, orderNo, employeeId, storeId, status, totalPoints, items, version, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        orderNo:
+          type: string
+        employeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        storeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        status:
+          type: string
+          enum: [CREATING, CONFIRMED, CANCELLED, VERIFIED, REFUND_PENDING, REFUNDED, FAILED]
+        totalPoints:
+          type: integer
+          format: int64
+          minimum: 1
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        verificationCode:
+          type: [string, 'null']
+          description: 仅在允许核销的状态返回短时展示码，不作为数据库明文凭证。
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+        updatedAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    OrderItem:
+      type: object
+      additionalProperties: false
+      required: [skuId, skuNameSnapshot, pointsPrice, quantity, subtotalPoints]
+      properties:
+        skuId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        skuNameSnapshot:
+          type: string
+        pointsPrice:
+          type: integer
+          format: int64
+          minimum: 1
+        quantity:
+          type: integer
+          minimum: 1
+        subtotalPoints:
+          type: integer
+          format: int64
+          minimum: 1
+    OrderVersionReasonCommand:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, reason]
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 500
+    VerifyOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [verificationCode, storeId, confirmationToken]
+      properties:
+        verificationCode:
+          type: string
+          minLength: 16
+          maxLength: 512
+        storeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        confirmationToken:
+          type: string
+          minLength: 16
+    VerificationRecord:
+      type: object
+      additionalProperties: false
+      required: [id, orderId, storeId, verifierEmployeeId, verifiedAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        orderId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        storeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        verifierEmployeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        verifiedAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    CreateRefundRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, expectedOrderVersion]
+      properties:
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 1000
+        expectedOrderVersion:
+          type: integer
+          minimum: 1
+        evidenceRefs:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 512
+    MallRefund:
+      type: object
+      additionalProperties: false
+      required: [id, orderId, requesterEmployeeId, pointsAmount, reason, status, version, createdAt]
+      properties:
+        id:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        orderId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        requesterEmployeeId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        approverEmployeeId:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/DistributedId'
+            - type: 'null'
+        workItemId:
+          oneOf:
+            - $ref: './common.yaml#/components/schemas/DistributedId'
+            - type: 'null'
+        pointsAmount:
+          type: integer
+          format: int64
+          minimum: 1
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [PENDING_APPROVAL, APPROVED, REJECTED, REFUNDING, REFUNDED, FAILED]
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
+    RefundDecisionCommand:
+      type: object
+      additionalProperties: false
+      required: [workItemId, decision, decidedBy, reason, decidedAt]
+      properties:
+        workItemId:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        decision:
+          type: string
+          enum: [APPROVED, REJECTED]
+        decidedBy:
+          $ref: './common.yaml#/components/schemas/DistributedId'
+        reason:
+          type: string
+          minLength: 2
+          maxLength: 1000
+        decidedAt:
+          $ref: './common.yaml#/components/schemas/UtcDateTime'
