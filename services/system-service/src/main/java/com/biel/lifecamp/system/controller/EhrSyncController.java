@@ -7,6 +7,8 @@ import com.biel.lifecamp.system.config.SystemOpenApiConfiguration;
 import com.biel.lifecamp.system.model.dto.request.StartEhrSyncReq;
 import com.biel.lifecamp.system.model.dto.response.EhrSyncRunPageResp;
 import com.biel.lifecamp.system.model.dto.response.EhrSyncRunResp;
+import com.biel.lifecamp.system.model.dto.response.EhrSyncIssuePageResp;
+import com.biel.lifecamp.system.model.dto.response.EhrSyncIssueResp;
 import com.biel.lifecamp.system.service.EhrSyncService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -53,17 +55,17 @@ public final class EhrSyncController {
      *
      * @param idempotencyKey 幂等键
      * @param request 人工同步请求
-     * @return 已执行的同步运行
+     * @return 已受理的同步运行
      */
     @Operation(
             operationId = "startEhrEmployeeFullSync",
-            summary = "人工执行 EHR 人员全量同步",
-            description = "在当前请求中完成 EHR 全量拉取、快照校验和本地人员投影生效。"
-                    + "同一 Idempotency-Key 重复提交时返回已有运行结果；请求超时后应先查询"
-                    + "运行结果，不能更换幂等键直接重试。")
+            summary = "提交 EHR 人员全量同步",
+            description = "创建 PENDING 运行后立即返回，由后台线程完成 EHR 全量拉取、快照校验"
+                    + "和本地人员投影生效。客户端应使用返回的运行标识查询进度；同一 "
+                    + "Idempotency-Key 重复提交时返回已有运行结果。")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "202", description = "同步已执行并返回本次运行结果",
+                    responseCode = "202", description = "同步已受理并返回 PENDING 运行",
                     useReturnTypeSchema = true),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "400", description = "请求字段、确认票据或同步前置条件无效",
@@ -72,7 +74,7 @@ public final class EhrSyncController {
                     responseCode = "401", description = "缺少、无效或已撤销的认证信息",
                     content = @Content(schema = @Schema(implementation = ApiResponse.class))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "409", description = "已有其他 EHR 同步运行正在执行",
+                    responseCode = "503", description = "本实例同步执行队列已满",
                     content = @Content(schema = @Schema(implementation = ApiResponse.class))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "500", description = "EHR 拉取、校验或本地生效发生技术故障",
@@ -91,7 +93,7 @@ public final class EhrSyncController {
         requireAdminPermission(servletRequest, "system:ehr-sync:execute");
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(EhrSyncRunResp.from(
-                        ehrSyncService.executeFullSync("MANUAL", idempotencyKey))));
+                        ehrSyncService.submitFullSync("MANUAL", idempotencyKey))));
     }
 
     /**
@@ -167,6 +169,47 @@ public final class EhrSyncController {
                                 "COMMON_RESOURCE_NOT_FOUND", "Resource not found"))
                 : ResponseEntity.ok(
                         ApiResponse.success(EhrSyncRunResp.from(run)));
+    }
+
+    /**
+     * 分页查询指定运行中的人员级问题。
+     *
+     * @param syncRunId 同步运行标识
+     * @param afterId 问题主键游标
+     * @param pageSize 当前页大小
+     * @param servletRequest 当前请求
+     * @return 问题分页，不存在同步运行时返回 404
+     */
+    @Operation(
+            operationId = "listEhrSyncIssues",
+            summary = "查询 EHR 同步失败人员",
+            description = "按问题主键正序分页返回失败工号、失败阶段、问题编码和脱敏摘要。")
+    @GetMapping("/{syncRunId}/issues")
+    ResponseEntity<ApiResponse<EhrSyncIssuePageResp>> listIssues(
+            @PathVariable long syncRunId,
+            @RequestParam(defaultValue = "0") @Min(0) long afterId,
+            @RequestParam(defaultValue = "100") @Min(1) @Max(100) int pageSize,
+            HttpServletRequest servletRequest) {
+        requireAdminPermission(servletRequest, "system:ehr-sync:read");
+        if (ehrSyncService.getRun(syncRunId) == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                    ApiResponse.failure(
+                            "COMMON_RESOURCE_NOT_FOUND", "Resource not found"));
+        }
+        var issues = ehrSyncService.listIssues(
+                syncRunId, afterId, pageSize + 1);
+        boolean hasMore = issues.size() > pageSize;
+        var pageItems = issues.stream()
+                .limit(pageSize)
+                .map(EhrSyncIssueResp::from)
+                .toList();
+        Long nextCursor = hasMore && !pageItems.isEmpty()
+                ? pageItems.getLast().id() : null;
+        return ResponseEntity.ok(ApiResponse.success(
+                new EhrSyncIssuePageResp(
+                        pageItems,
+                        new EhrSyncIssuePageResp.CursorPage(
+                                nextCursor, hasMore))));
     }
 
     /**

@@ -7,7 +7,7 @@ import java.util.List;
  * 仅向可信网关返回的实时身份与授权信息。
  *
  * @param employeeId 员工标识
- * @param organizationId 主组织标识
+ * @param organizationId 本地主组织标识；组织主数据尚未解析时为 0
  * @param sessionId 当前有效会话标识
  * @param clientType 登录客户端类型
  * @param authzVersion 当前权限版本

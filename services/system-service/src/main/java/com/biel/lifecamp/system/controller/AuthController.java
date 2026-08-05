@@ -237,7 +237,7 @@ public final class AuthController {
                 Long.toString(employee.id()),
                 employee.employeeNo(),
                 employee.displayName(),
-                Long.toString(employee.organizationId()),
+                employee.organizationIdValue(),
                 snapshot.roles(),
                 snapshot.permissions(),
                 snapshot.dataScopes(),
@@ -268,8 +268,7 @@ public final class AuthController {
         EmployeeDTO employee = snapshot.employee();
         return ApiResponse.success(new SessionContextResp(
                 Long.toString(employee.id()),
-                employee.organizationId() == null
-                        ? "0" : Long.toString(employee.organizationId()),
+                employee.organizationIdValue(),
                 request.sessionId(),
                 resolved.clientType(),
                 employee.authzVersion(),

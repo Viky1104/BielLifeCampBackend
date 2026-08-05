@@ -34,6 +34,21 @@ class EhrEmployeeSnapshotValidatorTest {
     }
 
     /**
+     * 验证来源接口不返回 EHR 人员标识时，以工号作为同步唯一身份。
+     */
+    @Test
+    void usesEmployeeNumberWhenEhrPersonIdIsMissing() {
+        EhrEmployeeSnapshotDTO snapshot = new EhrEmployeeSnapshotDTO(
+                1, 1, List.of(employee(null, "E-1", "张三", "男")));
+
+        var result = validator.validate(snapshot);
+
+        assertThat(result.issues()).isEmpty();
+        assertThat(result.employees()).singleElement()
+                .satisfies(employee -> assertThat(employee.employeeNo()).isEqualTo("E-1"));
+    }
+
+    /**
      * 验证快照记录数与 EHR 声明总数不一致时整批拒绝。
      */
     @Test
@@ -59,10 +74,10 @@ class EhrEmployeeSnapshotValidatorTest {
     }
 
     /**
-     * 验证重复 EHR 稳定人员标识只隔离重复人员。
+     * 验证来源中的非权威人员标识不参与身份唯一性判断。
      */
     @Test
-    void isolatesDuplicateEhrPersonId() {
+    void ignoresDuplicateEhrPersonIdWhenEmployeeNumbersDiffer() {
         EhrEmployeeSnapshotDTO snapshot = new EhrEmployeeSnapshotDTO(
                 2, 1, List.of(
                         employee("P-1", "E-1", "张三", "男"),
@@ -70,13 +85,10 @@ class EhrEmployeeSnapshotValidatorTest {
 
         var result = validator.validate(snapshot);
 
-        assertThat(result.employees()).hasSize(1);
-        assertThat(result.issues()).singleElement()
-                .satisfies(issue -> {
-                    assertThat(issue.issueCode()).isEqualTo("EHR_DUPLICATE_IDENTITY");
-                    assertThat(issue.employeeNo()).isEqualTo("E-2");
-                    assertThat(issue.detailDigest()).contains("ehr person id");
-                });
+        assertThat(result.issues()).isEmpty();
+        assertThat(result.employees())
+                .extracting(employee -> employee.employeeNo())
+                .containsExactly("E-1", "E-2");
     }
 
     /**
@@ -94,7 +106,7 @@ class EhrEmployeeSnapshotValidatorTest {
                 .satisfies(issue -> {
                     assertThat(issue.issueCode())
                             .isEqualTo("EHR_REQUIRED_FIELD_MISSING");
-                    assertThat(issue.ehrPersonId()).isEqualTo("P-1");
+                    assertThat(issue.ehrPersonId()).isNull();
                     assertThat(issue.detailDigest()).contains("employee number");
                 });
     }
@@ -122,7 +134,7 @@ class EhrEmployeeSnapshotValidatorTest {
         assertThat(result.issues()).singleElement()
                 .satisfies(issue -> {
                     assertThat(issue.issueCode()).isEqualTo("EHR_MOBILE_INVALID");
-                    assertThat(issue.ehrPersonId()).isEqualTo("P-1");
+                    assertThat(issue.ehrPersonId()).isEqualTo("E-1");
                     assertThat(issue.employeeNo()).isEqualTo("E-1");
                 });
     }

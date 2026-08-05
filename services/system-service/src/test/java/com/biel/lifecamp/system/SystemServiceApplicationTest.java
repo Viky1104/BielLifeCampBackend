@@ -100,6 +100,10 @@ class SystemServiceApplicationTest {
                         "$.paths['/api/system/v1/ehr-sync-runs/{syncRunId}'].get.operationId")
                         .value("getEhrSyncRun"))
                 .andExpect(jsonPath(
+                        "$.paths['/api/system/v1/ehr-sync-runs/{syncRunId}/issues']"
+                                + ".get.operationId")
+                        .value("listEhrSyncIssues"))
+                .andExpect(jsonPath(
                         "$.paths['/api/system/v1/ehr-sync-runs'].post.parameters[0].name")
                         .value("Idempotency-Key"))
                 .andExpect(jsonPath(

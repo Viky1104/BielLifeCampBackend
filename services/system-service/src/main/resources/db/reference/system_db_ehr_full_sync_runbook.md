@@ -132,7 +132,7 @@ system-service 的 JVM 堆上限、单页大小和一次同步期间来源 DTO/�
 合法人员。直属上级解析和普通角色初始化仍在人员投影全部写入后执行。分页并发数和
 持久化批次大小在线程池与事务开始前确定，修改 Nacos 配置后需要重启 system-service。
 
-人员字段缺失、手机号异常、批次内身份重复、工号归属冲突或单人数据库写入失败属于人员级问题。系统会通过数据库保存点只回滚问题人员，继续提交同批其他合法人员，并通过脱敏日志记录问题人员、失败阶段、原因和同步时间。人员失败明细和失败人数均不写数据库；`sys_ehr_sync_run.issue_count` 保持默认值 `0`。存在人员问题的运行状态仍为 `PARTIAL_SUCCEEDED`，用于防止把不完整批次误认为完整成功；该批次不会执行缺失人员离职对账，也不会首次打开认证门禁。
+人员字段缺失、手机号异常、批次内身份重复、工号归属冲突或单人数据库写入失败属于人员级问题。批量 SQL 失败后系统会回退为逐人短事务，只隔离问题人员并继续提交其他合法人员。脱敏问题明细写入 `sys_ehr_sync_issue`，失败人数写入 `sys_ehr_sync_run.issue_count`。存在人员问题的运行状态为 `PARTIAL_SUCCEEDED`，用于防止把不完整批次误认为完整成功；该批次不会执行缺失人员离职对账，但只要至少一名员工成功投影，就会开放登录门禁，问题人员不会阻断其他员工登录。登录检查同时兼容历史 `SUCCEEDED` 或 `PARTIAL_SUCCEEDED` 运行，只要其中至少一名员工已成功新增或更新，即使旧版本没有正确写入 `sys_integration_state`，其他已落库员工也可以正常登录。
 
 仓库提供了 `scripts/Test-EhrEmployeeEndpoint.ps1`。先通过受控环境变量注入 `EHR_URL` 和 `EHR_ESB_AUTH`，再运行该脚本；它只请求第一页和最后一页的单条记录，只输出分页元数据与字段名，不输出人员字段值或鉴权值。
 
@@ -152,7 +152,7 @@ Content-Type: application/json
 }
 ```
 
-同一个 `Idempotency-Key` 重复提交只会返回原运行记录。人工接口是同步执行，虽然 HTTP 状态为 `202`，请求线程仍会等待完整拉取和入库结束，应使用足够长的客户端超时。
+同一个 `Idempotency-Key` 重复提交只会返回原运行记录。人工接口先创建 `PENDING` 运行并立即返回 `202`，后台单线程执行完整拉取和入库。通过响应中的 `runId` 轮询运行详情，不需要延长 HTTP 客户端超时。
 
 安全提醒：当前 `confirmationToken` 只校验非空和长度，未参与真实授权；内部身份过滤器也不会强制每个请求必须携带身份。因此在补充运维授权校验前，只允许通过端口转发或受控内网直接访问 system-service，不得创建公网入口。
 
@@ -174,7 +174,7 @@ Invoke-RestMethod `
     -Headers $syncHeaders `
     -ContentType 'application/json' `
     -Body $syncBody `
-    -TimeoutSec 7200
+    -TimeoutSec 30
 ```
 
 ## 同步后验收
@@ -189,11 +189,12 @@ Invoke-RestMethod `
 6. 抽查直属上级未解析记录；它是警告，但数量异常时应暂停登录开放。
 7. 最终 `post_sync_readiness` 返回 `PASS`。
 
-若状态为 `PARTIAL_SUCCEEDED`，按 `runId` 检索 `ehr_employee_sync_item_failed` 日志，根据脱敏工号、`personRef`、`failureCode` 和 `failureReason` 定位并修复问题人员，再使用新的幂等键执行全量同步。问题批次中的合法人员已经提交，不需要人工回滚。
+若状态为 `PARTIAL_SUCCEEDED`，调用 `GET /api/system/v1/ehr-sync-runs/{runId}/issues?afterId=0&pageSize=100` 分页查询脱敏工号、失败阶段、问题编码和摘要；必要时再按 `runId` 检索失败日志。修复问题人员后使用新的幂等键执行全量同步。问题批次中的合法人员已经提交，不需要人工回滚。
 
 日志事件：
 
-- `ehr_employee_sync_item_succeeded`：记录不可逆 `personRef`、脱敏工号、组织编码、`INSERTED/UPDATED` 和同步时间。
+- `ehr_sync_stage_started` / `ehr_sync_stage_progress` / `ehr_sync_stage_completed`：按拉取、校验、员工入库、直属上级、默认角色、离职对账和收尾七个阶段记录线程、批次、已处理量、剩余量、速率和预计剩余时间。
+- `ehr_sync_issue_summary`：汇总校验、入库、直属上级和角色失败人数。
 - `ehr_employee_sync_item_failed`：记录不可逆 `personRef`、脱敏工号、失败阶段、稳定失败码、失败原因和同步时间。
 - `ehr_employee_sync_succeeded`：同时覆盖 `SUCCEEDED` 和 `PARTIAL_SUCCEEDED`，以 `status` 和 `issueCount` 区分。
 - `ehr_employee_sync_failed`：只表示分页、空快照、数量不一致或同步基础设施等批次级失败。

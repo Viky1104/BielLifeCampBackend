@@ -29,6 +29,13 @@
         SELECT COUNT(*)
         FROM sys_ehr_sync_issue
     </select>
+
+    <select id="selectSyncIssues"
+            resultType="com.biel.lifecamp.system.dao.EhrSyncTestMapper$SyncIssueProjection">
+        SELECT employee_no, failure_stage, issue_code
+        FROM sys_ehr_sync_issue
+        ORDER BY id
+    </select>
     <delete id="deleteEmployeeStages">DELETE FROM sys_ehr_employee_stage</delete>
     <delete id="deleteSyncRuns">DELETE FROM sys_ehr_sync_run</delete>
     <delete id="deleteTaskLeases">DELETE FROM sys_task_lease</delete>
@@ -43,13 +50,28 @@
              'ACTIVE', 'UNBOUND', 'ACTIVE', 1)
     </insert>
 
-    <update id="resetIntegrationState">
-        UPDATE sys_integration_state
-        SET initial_sync_completed = FALSE,
+    <insert id="insertLegacyEhrEmployee">
+        INSERT INTO sys_employee
+            (ehr_person_id, employee_no, display_name, source_type,
+             employment_status, binding_status, account_status, authz_version)
+        VALUES
+            (#{ehrPersonId}, #{employeeNo}, #{displayName}, 'EHR',
+             'ACTIVE', 'UNBOUND', 'ACTIVE', 1)
+    </insert>
+
+    <insert id="resetIntegrationState">
+        INSERT INTO sys_integration_state
+            (connection_code, initial_sync_completed, last_successful_at, updated_at)
+        VALUES ('EHR', FALSE, NULL, CURRENT_TIMESTAMP)
+        ON DUPLICATE KEY UPDATE
+            initial_sync_completed = FALSE,
             last_successful_at = NULL,
             updated_at = CURRENT_TIMESTAMP
-        WHERE connection_code = 'EHR'
-    </update>
+    </insert>
+
+    <delete id="deleteIntegrationState">
+        DELETE FROM sys_integration_state WHERE connection_code = 'EHR'
+    </delete>
 
     <select id="selectEmployees" resultMap="employeeProjectionMap">
         SELECT id, ehr_person_id, employee_no, display_name,

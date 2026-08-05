@@ -129,7 +129,6 @@ Resource 位置；Windows 本地文件必须使用 `file:D:/...`，不能只写�
 
 | 路径 | 目标服务 |
 |---|---|
-| `POST /api/system/v1/ehr-sync-runs` | system-service（独立长响应超时） |
 | `/api/system/**` | system-service |
 | `/api/communications/**` | communication-service |
 | `/api/workbench/**` | workbench-service |
@@ -155,10 +154,9 @@ Spring Cloud LoadBalancer 默认使用轮询策略，九个固定服务在 Gatew
 Caffeine 缓存实例列表；缓存默认有效 `10s`、容量 `256`。Gateway 不自动重试转发请求，
 避免 POST 等非幂等操作被重复执行。没有可用实例时返回 `503`。
 
-Gateway 下游建连超时默认 `3s`，普通响应超时默认 `30s`。由于
-`POST /api/system/v1/ehr-sync-runs` 当前仍在请求线程中执行全量同步，该路由单独使用
-`10m` 响应上限；客户端仍必须提交 `Idempotency-Key`，超时后先查询同步运行结果，不能直接
-以新幂等键重复执行。
+Gateway 下游建连超时默认 `3s`，响应超时默认 `30s`。人工 EHR 全量同步接口会先落库
+`PENDING` 运行并立即返回 `202`，由 system-service 后台线程执行；客户端必须提交稳定的
+`Idempotency-Key`，并使用返回的 `runId` 查询最终状态。
 
 跨域预检统一在 Gateway 处理，不进入认证或下游转发。默认仅允许本地开发地址
 `http://localhost:5173` 和 `http://127.0.0.1:5173`，允许
@@ -256,7 +254,9 @@ Redis 用户名和密码必须由 Kubernetes Secret 注入 Pod，不得把真实
 `AUTH_LOGIN_CONTEXT_MISSING` 或 `AUTH_LOGIN_CONTEXT_UNAVAILABLE`（HTTP 503）；快照与内部身份
 不一致时返回 `AUTH_LOGIN_CONTEXT_INVALID`（HTTP 401）。
 
-完整键模型、权限变化、并发和故障语义见
+当前实现的登录、Token、数据库与 Redis 存储分工、完整键模型、权限变化、并发和故障语义见
+[`认证、Token、会话与 Redis 存储设计`](services/system-service/src/main/resources/db/reference/system_auth_token_session_storage_design.md)。
+外部总体设计资料见
 [`06-Redis会话与授权缓存设计-v1.md`](../docs/04-技术设计/01-身份与权限/06-Redis会话与授权缓存设计-v1.md)。
 ACK 当前 Redis 是开发单实例，只允许开发联调；共享非生产和生产必须先切换到 Tair 主从高可用。
 
@@ -356,9 +356,9 @@ Knife4j 4.5.0 官方 Gateway starter 编译基线是 Spring Boot 3 / Spring Fram
 | `EHR_MAX_RECORDS` | 单次全量快照最大人员数，防止异常元数据造成 OOM | `200000` |
 | `EHR_PERSISTENCE_BATCH_SIZE` | 人员暂存和投影批量写入数量 | `500`，允许 `1～1000` |
 | `AUTH_GATEWAY_SERVICE_TOKEN` | Gateway 调 system-service 的附加服务凭据 | 空；启用时至少 32 字符，且生产仍要求 HTTPS/mTLS |
-| `SYSTEM_AUTHORIZATION_URI` | Gateway 实时会话校验地址 | 默认开发占位地址；生产必须是 HTTPS 内网地址 |
-| `INTERNAL_IDENTITY_PRIVATE_KEY` / `INTERNAL_IDENTITY_PUBLIC_KEY` | Gateway 内部 JWS 密钥对 | 空 |
-| `INTERNAL_IDENTITY_ENABLED` | 业务服务是否验签内部 JWS | `false`；受保护 API 上线前必须开启 |
+| `SYSTEM_AUTHORIZATION_URI` | Gateway 实时会话校验地址 | 本地默认 `http://127.0.0.1:8081/internal/system/v1/auth/session-context`；生产必须是 HTTPS 内网地址 |
+| `INTERNAL_IDENTITY_PRIVATE_KEY` / `INTERNAL_IDENTITY_PUBLIC_KEY` | Gateway 内部 JWS PKCS#8 私钥、X.509 公钥资源位置 | 本地使用 `file:D:/DevelopEnviroment/keys/biel-life-camp/internal-identity-*.pem`；不得与外部 JWT 密钥对共用 |
+| `INTERNAL_IDENTITY_ENABLED` | 业务服务是否验签内部 JWS | 当前本地 system-service 默认为 `true`；部署环境必须显式配置公钥 |
 | `INTERNAL_IDENTITY_ISSUER` / `INTERNAL_IDENTITY_KEY_ID` | 内部 JWS issuer / key ID | issuer 默认 `biel-life-camp-gateway` |
 | `AUTH_REDIS_SESSION_ENABLED` | system-service 是否使用 Redis 在线会话主路径 | `false`；与授权缓存一起开启 |
 | `AUTH_REDIS_SESSION_KEY_PREFIX` | 在线会话键前缀 | `biel:auth:session:v1` |
@@ -441,7 +441,8 @@ D:/logs/biel-life-camp/system-service.log.error.yyyy-MM-dd.N.gz
 同时评估 stdout 与文件的重复采集及 Pod 重建后的保留策略。
 
 日志不得打印密码、Token、密钥、完整手机号、OpenID、身份证号或完整请求体。人员同步等批量
-任务应记录稳定的员工标识、同步时间、结果和脱敏后的失败原因，不持久化仅用于排错的失败日志。
+任务应记录稳定的员工标识、同步时间、结果和脱敏后的失败原因；数据库只持久化结构化、脱敏的
+人员问题，不保存原始响应或异常堆栈。
 
 认证配置中的密钥值是 Spring Resource 位置，例如 `file:/run/secrets/auth-private.pem`，不是 PEM 正文本身。外部 JWT 与内部 JWS 使用两套独立 RSA 密钥。`AUTH_ALLOW_EPHEMERAL_KEYS` 只供自动化测试，生产禁止开启。system-service 的 EHR 初始同步标志默认为未完成；在真实全量同步成功前，小程序登录返回 `AUTH_EHR_INITIAL_SYNC_REQUIRED`，不得手工绕过。
 
@@ -461,13 +462,15 @@ EHR 同步通过 XXL-JOB 处理器 `ehrEmployeeFullSyncJob` 触发，调度中�
 空快照、分页变化或关键字段异常会整批失败，不会执行离职标记。集群并发由
 `sys_task_lease` 数据库租约保护。
 
-人员生效阶段按 `EHR_PERSISTENCE_BATCH_SIZE` 批量写入暂存表和员工投影，减少数据库
-往返；批量 SQL 失败时先回滚该批保存点，再逐人重试并隔离问题人员，因此不会改变
+人员生效阶段按 `EHR_PERSISTENCE_BATCH_SIZE` 使用短事务批量写入员工投影、直属上级和默认
+角色，减少数据库往返；批量 SQL 失败时再逐人重试并隔离问题人员，因此不会改变
 “单个人员失败不回滚其他合法人员”的规则。分页并发数和持久化批次大小变更后需要重启
 system-service，使线程池与任务配置重新初始化。
 
-首次上线通过人工接口 `POST /api/system/v1/ehr-sync-runs` 执行同步，请求头必须提供 16～128 字符的
-`Idempotency-Key`。重复提交同一个幂等键只返回已有运行；需要重新同步时应在确认上一运行结果后更换幂等键。
+首次上线通过人工接口 `POST /api/system/v1/ehr-sync-runs` 提交同步，请求头必须提供 16～128 字符的
+`Idempotency-Key`。接口立即返回 `PENDING` 运行，后续通过 `GET /api/system/v1/ehr-sync-runs/{runId}`
+查询结果；失败人员通过 `GET /api/system/v1/ehr-sync-runs/{runId}/issues` 分页查询。重复提交同一个
+幂等键只返回已有运行；需要重新同步时应在确认上一运行结果后更换幂等键。
 EHR 同步启用时，无论认证开关是否启用，
 都必须配置至少 32 字符且长期稳定的 `AUTH_IDENTIFIER_PEPPER`。
 

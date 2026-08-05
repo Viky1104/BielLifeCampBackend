@@ -10,7 +10,6 @@ import java.time.LocalDateTime;
  * @since 2026-07-29
  */
 public record EhrEmployeeUpsertDTO(
-        String ehrPersonId,
         String employeeNo,
         String displayName,
         String genderCode,

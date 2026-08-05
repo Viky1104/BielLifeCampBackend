@@ -60,24 +60,35 @@ public final class EhrEmployeeManagerImpl implements EhrEmployeeManager {
      */
     @Override
     public EhrEmployeeSnapshotDTO fetchActiveEmployeeSnapshot() {
+        return fetchActiveEmployeeSnapshot(-1L);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public EhrEmployeeSnapshotDTO fetchActiveEmployeeSnapshot(long runId) {
         long startedNanos = System.nanoTime();
         LOGGER.info(
-                "开始从 EHR 拉取在职人员全量快照，pageSize={}，maxPages={}，"
-                        + "pageConcurrency={}，maxRecords={}",
-                properties.getPageSize(), properties.getMaxPages(),
-                properties.getPageConcurrency(), properties.getMaxRecords());
+                "event=ehr_snapshot_fetch_started runId={} pageSize={} maxPages={} "
+                        + "pageConcurrency={} maxRecords={} thread={}",
+                runId, properties.getPageSize(), properties.getMaxPages(),
+                properties.getPageConcurrency(), properties.getMaxRecords(), threadName());
 
         /*
          * 第一页必须同步获取。只有取得可信的总页数和总人数后，才能决定后续任务窗口，
          * 也才能在创建全量集合前执行人数上限检查。
          */
-        Page firstPage = fetchPage(1);
+        Page firstPage = fetchPage(runId, 1);
         validateFirstPage(firstPage);
         LOGGER.info(
-                "EHR 人员快照分页元数据已确认，declaredRecords={}，totalPages={}，"
-                        + "pageConcurrency={}",
-                firstPage.totalRecords(), firstPage.totalPages(),
-                properties.getPageConcurrency());
+                "event=ehr_page_progress runId={} completedPages=1 totalPages={} "
+                        + "remainingPages={} accumulatedRecords={} totalRecords={} "
+                        + "remainingRecords={} progressPercent={} thread={}",
+                runId, firstPage.totalPages(), remaining(1, firstPage.totalPages()),
+                firstPage.employees().size(), firstPage.totalRecords(),
+                remaining(firstPage.employees().size(), firstPage.totalRecords()),
+                progressPercent(1, firstPage.totalPages()), threadName());
 
         /*
          * maxRecords 已通过校验，因此此处容量转换不会溢出。集合只保存最终来源 DTO，
@@ -86,15 +97,15 @@ public final class EhrEmployeeManagerImpl implements EhrEmployeeManager {
         List<EhrEmployeeSourceDTO> employees =
                 new ArrayList<>(Math.toIntExact(firstPage.totalRecords()));
         employees.addAll(firstPage.employees());
-        fetchRemainingPages(firstPage, employees);
+        fetchRemainingPages(runId, firstPage, employees);
 
         long durationMs = TimeUnit.NANOSECONDS.toMillis(
                 System.nanoTime() - startedNanos);
         LOGGER.info(
-                "EHR 在职人员全量快照拉取完成，actualRecords={}，totalPages={}，"
-                        + "pageConcurrency={}，durationMs={}",
-                employees.size(), firstPage.totalPages(),
-                properties.getPageConcurrency(), durationMs);
+                "event=ehr_snapshot_fetch_completed runId={} actualRecords={} totalPages={} "
+                        + "pageConcurrency={} durationMs={} thread={}",
+                runId, employees.size(), firstPage.totalPages(),
+                properties.getPageConcurrency(), durationMs, threadName());
         return new EhrEmployeeSnapshotDTO(
                 firstPage.totalRecords(), firstPage.totalPages(), employees);
     }
@@ -137,14 +148,14 @@ public final class EhrEmployeeManagerImpl implements EhrEmployeeManager {
      * @param employees 最终来源人员集合
      */
     private void fetchRemainingPages(
-            Page firstPage, List<EhrEmployeeSourceDTO> employees) {
+            long runId, Page firstPage, List<EhrEmployeeSourceDTO> employees) {
         int nextPageNo = 2;
         Deque<PendingPage> pendingPages =
                 new ArrayDeque<>(properties.getPageConcurrency());
         try {
             while (nextPageNo <= firstPage.totalPages()
                     && pendingPages.size() < properties.getPageConcurrency()) {
-                pendingPages.addLast(submitPage(nextPageNo));
+                pendingPages.addLast(submitPage(runId, nextPageNo));
                 nextPageNo++;
             }
 
@@ -157,19 +168,25 @@ public final class EhrEmployeeManagerImpl implements EhrEmployeeManager {
                 Page page = awaitPage(pendingPage);
                 validatePageConsistency(firstPage, pendingPage.pageNo(), page);
                 employees.addAll(page.employees());
-                LOGGER.debug(
-                        "EHR 人员快照分页汇总完成，pageNo={}，pageRecords={}，"
-                                + "accumulatedRecords={}，pendingPages={}",
-                        pendingPage.pageNo(), page.employees().size(),
-                        employees.size(), pendingPages.size());
+                LOGGER.info(
+                        "event=ehr_page_progress runId={} completedPages={} totalPages={} "
+                                + "remainingPages={} pageRecords={} accumulatedRecords={} "
+                                + "totalRecords={} remainingRecords={} progressPercent={} "
+                                + "pendingPages={} thread={}",
+                        runId, pendingPage.pageNo(), firstPage.totalPages(),
+                        remaining(pendingPage.pageNo(), firstPage.totalPages()),
+                        page.employees().size(), employees.size(), firstPage.totalRecords(),
+                        remaining(employees.size(), firstPage.totalRecords()),
+                        progressPercent(pendingPage.pageNo(), firstPage.totalPages()),
+                        pendingPages.size(), threadName());
 
                 if (nextPageNo <= firstPage.totalPages()) {
-                    pendingPages.addLast(submitPage(nextPageNo));
+                    pendingPages.addLast(submitPage(runId, nextPageNo));
                     nextPageNo++;
                 }
             }
         } catch (RuntimeException | Error exception) {
-            cancelPendingPages(pendingPages);
+            cancelPendingPages(runId, pendingPages);
             throw exception;
         }
     }
@@ -180,8 +197,8 @@ public final class EhrEmployeeManagerImpl implements EhrEmployeeManager {
      * @param pageNo 页码
      * @return 带页码的待完成任务
      */
-    private PendingPage submitPage(int pageNo) {
-        Future<Page> future = pageTaskExecutor.submit(() -> fetchPage(pageNo));
+    private PendingPage submitPage(long runId, int pageNo) {
+        Future<Page> future = pageTaskExecutor.submit(() -> fetchPage(runId, pageNo));
         return new PendingPage(pageNo, future);
     }
 
@@ -247,7 +264,7 @@ public final class EhrEmployeeManagerImpl implements EhrEmployeeManager {
      *
      * @param pendingPages 尚未汇总的分页任务
      */
-    private void cancelPendingPages(Deque<PendingPage> pendingPages) {
+    private void cancelPendingPages(long runId, Deque<PendingPage> pendingPages) {
         int cancelledCount = 0;
         for (PendingPage pendingPage : pendingPages) {
             if (pendingPage.future().cancel(true)) {
@@ -256,8 +273,9 @@ public final class EhrEmployeeManagerImpl implements EhrEmployeeManager {
         }
         pendingPages.clear();
         if (cancelledCount > 0) {
-            LOGGER.warn("EHR 分页拉取异常，已取消窗口内任务，cancelledPages={}",
-                    cancelledCount);
+            LOGGER.warn(
+                    "event=ehr_page_window_cancelled runId={} cancelledPages={} thread={}",
+                    runId, cancelledCount, threadName());
         }
     }
 
@@ -266,40 +284,74 @@ public final class EhrEmployeeManagerImpl implements EhrEmployeeManager {
      *
      * <p>requestId 仅用于 ESB 链路追踪；日志不记录认证头、手机号或响应正文。</p>
      *
+     * @param runId 同步运行标识
      * @param pageNo 从 1 开始的页码
      * @return 已解析的分页数据
      */
-    private Page fetchPage(int pageNo) {
+    private Page fetchPage(long runId, int pageNo) {
         String requestId = UUID.randomUUID().toString();
-        LOGGER.debug("开始拉取 EHR 人员快照分页，pageNo={}，requestId={}",
-                pageNo, requestId);
-        String body = restClient.get()
-                .uri(builder -> builder
-                        .queryParam("ts", properties.getFullSince())
-                        .queryParam("pageSize", properties.getPageSize())
-                        .queryParam("pageNo", pageNo)
-                        .queryParam("state", "N")
-                        .build())
-                .header("sourceSystem", properties.getSourceSystem())
-                .header("targetSystem", properties.getTargetSystem())
-                .header("serviceName", properties.getServiceName())
-                .header("requestId", requestId)
-                .header("routeId", properties.getRouteId())
-                .header("EsbAuth", properties.getAuth())
-                .header(HttpHeaders.ACCEPT, "application/json")
-                .retrieve()
-                .body(String.class);
-        return parsePage(body);
+        long startedNanos = System.nanoTime();
+        LOGGER.info(
+                "event=ehr_page_fetch_started runId={} pageNo={} requestId={} thread={}",
+                runId, pageNo, requestId, threadName());
+        try {
+            byte[] body = restClient.get()
+                    .uri(builder -> builder
+                            .queryParam("ts", properties.getFullSince())
+                            .queryParam("pageSize", properties.getPageSize())
+                            .queryParam("pageNo", pageNo)
+                            .queryParam("state", "Y")
+                            .build())
+                    .header("sourceSystem", properties.getSourceSystem())
+                    .header("targetSystem", properties.getTargetSystem())
+                    .header("serviceName", properties.getServiceName())
+                    .header("requestId", requestId)
+                    .header("routeId", properties.getRouteId())
+                    .header("EsbAuth", properties.getAuth())
+                    .header(HttpHeaders.ACCEPT, "application/json")
+                    .retrieve()
+                    .body(byte[].class);
+            Page page = parsePage(body);
+            LOGGER.info(
+                    "event=ehr_page_fetch_completed runId={} pageNo={} pageRecords={} "
+                            + "totalPages={} durationMs={} requestId={} thread={}",
+                    runId, pageNo, page.employees().size(), page.totalPages(),
+                    elapsedMillis(startedNanos), requestId, threadName());
+            return page;
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "event=ehr_page_fetch_failed runId={} pageNo={} durationMs={} "
+                            + "requestId={} failureType={} thread={}",
+                    runId, pageNo, elapsedMillis(startedNanos), requestId,
+                    exception.getClass().getSimpleName(), threadName());
+            throw exception;
+        }
+    }
+
+    private long elapsedMillis(long startedNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+    }
+
+    private int progressPercent(int completed, int total) {
+        return total < 1 ? 0 : Math.min(100, (int) ((long) completed * 100 / total));
+    }
+
+    private long remaining(long completed, long total) {
+        return Math.max(0, total - completed);
+    }
+
+    private String threadName() {
+        return Thread.currentThread().getName();
     }
 
     /**
      * 解析并校验 EHR 单页响应的最小契约。
      *
-     * @param body EHR 原始响应，仅在内存中解析且禁止写入日志
+     * @param body EHR 原始响应字节，仅在内存中解析且禁止写入日志
      * @return 分页数据
      * @throws EhrSyncException 响应码、分页元数据或 JSON 结构不合法时抛出
      */
-    private Page parsePage(String body) {
+    private Page parsePage(byte[] body) {
         try {
             JsonNode root = objectMapper.readTree(body);
             if (!"0".equals(text(root, "code"))) {

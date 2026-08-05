@@ -66,9 +66,21 @@
     </sql>
 
     <select id="selectInitialEhrSyncCompleted" resultType="java.lang.Boolean">
-        SELECT initial_sync_completed
-        FROM sys_integration_state
-        WHERE connection_code = 'EHR'
+        SELECT CASE
+            WHEN EXISTS (
+                SELECT 1
+                FROM sys_integration_state
+                WHERE connection_code = 'EHR'
+                  AND initial_sync_completed = TRUE
+            ) THEN TRUE
+            WHEN EXISTS (
+                SELECT 1
+                FROM sys_ehr_sync_run
+                WHERE status IN ('SUCCEEDED', 'PARTIAL_SUCCEEDED')
+                  AND (inserted_count + updated_count) > 0
+            ) THEN TRUE
+            ELSE FALSE
+        END
     </select>
 
     <select id="selectActiveEmployeesByMobileHash" resultMap="employeeResultMap">

@@ -3,10 +3,13 @@ package com.biel.lifecamp.system.dao;
 import com.biel.lifecamp.system.model.dto.EhrEmployeePersistItemDTO;
 import com.biel.lifecamp.system.model.dto.EhrEmployeeUpsertDTO;
 import com.biel.lifecamp.system.model.dto.EhrSyncPromotionResultDTO;
+import com.biel.lifecamp.system.model.dto.EhrSyncIssueCreateDTO;
+import com.biel.lifecamp.system.model.dto.EhrSyncIssueDTO;
 import com.biel.lifecamp.system.model.dto.EhrSyncRunCreateDTO;
 import com.biel.lifecamp.system.model.dto.EhrSyncRunDTO;
-import com.biel.lifecamp.system.model.dto.EmployeeIdentityDTO;
 import com.biel.lifecamp.system.model.dto.EmployeeReferenceDTO;
+import com.biel.lifecamp.system.model.dto.EmployeeRoleAssignmentCreateDTO;
+import com.biel.lifecamp.system.model.dto.EmployeeSupervisorUpdateDTO;
 import java.time.Instant;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
@@ -87,20 +90,34 @@ public interface EhrSyncMapper {
                         @Param("completedAt") Instant completedAt);
 
     /**
-     * 查询已经存在的 EHR 人员标识，用于计算新增和更新数量。
+     * 批量保存人员级同步问题。
      *
-     * @param ehrPersonIds 本批次 EHR 人员标识
-     * @return 已存在的 EHR 人员标识
+     * @param issues 固定大小的问题记录
+     * @return 新增行数
      */
-    List<String> selectExistingEhrPersonIds(@Param("ehrPersonIds") List<String> ehrPersonIds);
+    int insertSyncIssueBatch(
+            @Param("issues") List<EhrSyncIssueCreateDTO> issues);
 
     /**
-     * 查询工号当前归属，用于阻止其他 EHR 人员误更新已有员工。
+     * 按稳定主键游标查询指定运行的问题明细。
      *
-     * @param employeeNumbers 本批次工号
-     * @return 已存在的人员标识与工号归属
+     * @param runId 同步运行标识
+     * @param afterId 仅返回大于该主键的问题
+     * @param limit 最大返回条数
+     * @return 问题明细
      */
-    List<EmployeeIdentityDTO> selectExistingEmployeeIdentities(
+    List<EhrSyncIssueDTO> selectSyncIssues(
+            @Param("runId") long runId,
+            @Param("afterId") long afterId,
+            @Param("limit") int limit);
+
+    /**
+     * 查询已经存在的员工工号，用于计算新增和更新数量。
+     *
+     * @param employeeNumbers 本批次员工工号
+     * @return 已存在的员工工号
+     */
+    List<String> selectExistingEmployeeNumbers(
             @Param("employeeNumbers") List<String> employeeNumbers);
 
     /**
@@ -126,7 +143,7 @@ public interface EhrSyncMapper {
                          @Param("items") List<EhrEmployeePersistItemDTO> items);
 
     /**
-     * 按 EHR 人员标识新增或更新员工投影。
+     * 按员工工号新增或更新员工投影。
      *
      * @param employee 已校验的人员数据
      * @param mobileHash 规范化手机号的不可逆摘要
@@ -138,7 +155,7 @@ public interface EhrSyncMapper {
                        @Param("syncedAt") Instant syncedAt);
 
     /**
-     * 按 EHR 人员标识批量新增或更新员工投影。
+     * 按员工工号批量新增或更新员工投影。
      *
      * @param items 固定大小的人员持久化参数
      * @param syncedAt 本次同步时间
@@ -169,6 +186,47 @@ public interface EhrSyncMapper {
                          @Param("syncedAt") Instant syncedAt);
 
     /**
+     * 使用单条 SQL 批量更新直属领导关系。
+     *
+     * @param items 固定大小的直属领导更新参数
+     * @param syncedAt 本次同步时间
+     * @return 受影响行数
+     */
+    int updateSupervisorBatch(
+            @Param("items") List<EmployeeSupervisorUpdateDTO> items,
+            @Param("syncedAt") Instant syncedAt);
+
+    /**
+     * 查询本次同步中尚未分配指定角色的员工主键。
+     *
+     * @param runId 同步运行标识
+     * @param roleCode 角色编码
+     * @return 尚未分配角色的员工主键
+     */
+    List<EmployeeReferenceDTO> selectEmployeesMissingRole(
+            @Param("runId") long runId,
+            @Param("roleCode") String roleCode);
+
+    /**
+     * 按角色编码查询角色主键。
+     *
+     * @param roleCode 角色编码
+     * @return 角色主键，不存在时返回 {@code null}
+     */
+    Long selectRoleId(String roleCode);
+
+    /**
+     * 使用单条 SQL 批量初始化员工默认角色。
+     *
+     * @param items 固定大小的角色分配参数
+     * @param createdAt 创建时间
+     * @return 新增角色分配数量
+     */
+    int insertEmployeeRoleAssignmentBatch(
+            @Param("items") List<EmployeeRoleAssignmentCreateDTO> items,
+            @Param("createdAt") Instant createdAt);
+
+    /**
      * 为员工幂等初始化普通角色。
      *
      * @param assignmentId 角色分配主键
@@ -193,7 +251,7 @@ public interface EhrSyncMapper {
                                      @Param("syncedAt") Instant syncedAt);
 
     /**
-     * 标记 EHR 集成已至少成功完成一次全量同步。
+     * 标记 EHR 已至少成功投影一名可登录员工；状态行缺失时自动创建。
      *
      * @param completedAt 完成时间
      * @return 受影响行数

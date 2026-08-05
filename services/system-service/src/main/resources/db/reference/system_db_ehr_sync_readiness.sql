@@ -282,7 +282,7 @@ SELECT
         ELSE 'READY'
     END AS pre_sync_readiness;
 
--- 13. 同步后最终判定。首次同步执行完成后再次运行本脚本并查看本结果。
+-- 13. 完整离职对账最终判定。PARTIAL_SUCCEEDED 可开放登录，但仍不视为完整对账通过。
 SELECT
     CASE
         WHEN COALESCE((
@@ -316,4 +316,4 @@ SELECT
               AND a.id IS NULL
         ) THEN 'STOP_EMPLOYEE_ROLE_INCOMPLETE'
         ELSE 'PASS'
-    END AS post_sync_readiness;
+    END AS post_sync_full_reconciliation_readiness;

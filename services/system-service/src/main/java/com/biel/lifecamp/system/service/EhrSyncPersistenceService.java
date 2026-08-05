@@ -4,14 +4,14 @@ import com.biel.lifecamp.system.model.dto.EhrEmployeeValidationResultDTO;
 import com.biel.lifecamp.system.model.dto.EhrSyncPromotionResultDTO;
 
 /**
- * EHR 快照在本地数据库中的原子生效边界。
+ * EHR 快照在本地数据库中的分批生效边界。
  *
  * @author Biel Life Camp Team
  * @since 2026-07-29
  */
 public interface EhrSyncPersistenceService {
     /**
-     * 在一个事务中生效已校验的完整人员快照。
+     * 使用独立短事务分批生效已校验的完整人员快照。
      *
      * @param runId 同步运行标识
      * @param validationResult 人员级校验结果

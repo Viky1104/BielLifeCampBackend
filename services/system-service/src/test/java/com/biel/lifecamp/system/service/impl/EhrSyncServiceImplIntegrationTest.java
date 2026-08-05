@@ -10,6 +10,8 @@ import com.biel.lifecamp.system.model.dto.EhrEmployeeSourceDTO;
 import com.biel.lifecamp.system.model.dto.EhrSyncRunDTO;
 import com.biel.lifecamp.system.service.EhrSyncService;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,6 +51,7 @@ class EhrSyncServiceImplIntegrationTest {
      */
     @BeforeEach
     void setUp() {
+        ehrManager.resetBlocking();
         testMapper.deleteRoleAssignments();
         testMapper.deleteWechatProfiles();
         testMapper.deleteExternalIdentities();
@@ -59,6 +62,52 @@ class EhrSyncServiceImplIntegrationTest {
         testMapper.deleteTaskLeases();
         testMapper.deleteEmployees();
         testMapper.resetIntegrationState();
+    }
+
+    /**
+     * 验证人工提交立即返回待执行运行，实际拉取在专用后台线程继续。
+     *
+     * @throws Exception 等待后台任务超时或线程中断时抛出
+     */
+    @Test
+    void submittedFullSyncReturnsPendingBeforeBackgroundFetchCompletes()
+            throws Exception {
+        ehrManager.snapshot = snapshot(List.of(
+                employee("P-ASYNC", "E-ASYNC", "异步人员", null)));
+        ehrManager.blockNextFetch();
+
+        EhrSyncRunDTO submitted;
+        try {
+            submitted = ehrSyncService.submitFullSync(
+                    "MANUAL", "manual-async-submit");
+
+            assertThat(submitted.status()).isEqualTo("PENDING");
+            assertThat(ehrManager.awaitFetchStarted()).isTrue();
+            assertThat(ehrManager.fetchThreadName).startsWith("ehr-sync-");
+            assertThat(ehrSyncService.getRun(submitted.id()).status())
+                    .isEqualTo("RUNNING");
+        } finally {
+            ehrManager.releaseFetch();
+        }
+
+        assertThat(awaitRunStatus(submitted.id(), "SUCCEEDED").status())
+                .isEqualTo("SUCCEEDED");
+    }
+
+    /**
+     * 验证历史库缺少 EHR 集成状态种子数据时，同步会自动补建并开放登录门禁。
+     */
+    @Test
+    void successfulSyncCreatesMissingIntegrationStateAndOpensLoginGate() {
+        testMapper.deleteIntegrationState();
+        ehrManager.snapshot = snapshot(List.of(
+                employee("P-STATE", "E-STATE", "状态自愈人员", null)));
+
+        EhrSyncRunDTO run = ehrSyncService.executeFullSync(
+                "MANUAL", "manual-missing-integration-state");
+
+        assertThat(run.status()).isEqualTo("SUCCEEDED");
+        assertThat(testMapper.selectInitialSyncCompleted()).isTrue();
     }
 
     /**
@@ -104,6 +153,37 @@ class EhrSyncServiceImplIntegrationTest {
     }
 
     /**
+     * 验证直属领导和默认角色使用独立、可识别的批量阶段日志。
+     *
+     * @param output 当前测试方法捕获的控制台日志
+     */
+    @Test
+    void fullSyncLogsSeparatedSupervisorAndRoleBatchStages(CapturedOutput output) {
+        ehrManager.snapshot = snapshot(List.of(
+                employee("P-BATCH-100", "E-BATCH-100", "批量经理", null),
+                employee("P-BATCH-101", "E-BATCH-101", "批量员工一", "E-BATCH-100"),
+                employee("P-BATCH-102", "E-BATCH-102", "批量员工二", "E-BATCH-100")));
+
+        EhrSyncRunDTO run = ehrSyncService.executeFullSync(
+                "MANUAL", "manual-bulk-enrichment");
+
+        assertThat(run.roleInitializedCount()).isEqualTo(3);
+        assertThat(output.getOut())
+                .contains("event=ehr_sync_stage_started runId=" + run.id()
+                        + " stage=SUPERVISOR_LINKING")
+                .contains("event=ehr_sync_stage_progress runId=" + run.id()
+                        + " stage=SUPERVISOR_LINKING")
+                .contains("event=ehr_sync_stage_started runId=" + run.id()
+                        + " stage=DEFAULT_ROLE_INITIALIZING")
+                .contains("event=ehr_sync_stage_progress runId=" + run.id()
+                        + " stage=DEFAULT_ROLE_INITIALIZING")
+                .contains("processedRecords=3")
+                .contains("remainingRecords=0")
+                .contains("progressPercent=100")
+                .doesNotContain("event=ehr_enrichment_batch_committed");
+    }
+
+    /**
      * 验证后续完整快照会禁用缺失员工，但不会重复创建员工或角色。
      */
     @Test
@@ -128,6 +208,30 @@ class EhrSyncServiceImplIntegrationTest {
     }
 
     /**
+     * 验证升级前保存了 EHR 人员标识的员工，升级后可仅凭相同工号继续更新。
+     */
+    @Test
+    void updatesLegacyEmployeeByEmployeeNumberWithoutEhrPersonId() {
+        testMapper.insertLegacyEhrEmployee("P-LEGACY", "E100", "旧姓名");
+        ehrManager.snapshot = snapshot(List.of(
+                employee(null, "E100", "新姓名", null)));
+
+        EhrSyncRunDTO run = ehrSyncService.executeFullSync(
+                "MANUAL", "manual-employee-number-identity");
+
+        assertThat(run.status()).isEqualTo("SUCCEEDED");
+        assertThat(run.insertedCount()).isZero();
+        assertThat(run.updatedCount()).isOne();
+        assertThat(run.issueCount()).isZero();
+        assertThat(testMapper.selectEmployees()).singleElement()
+                .satisfies(employee -> {
+                    assertThat(employee.employeeNo()).isEqualTo("E100");
+                    assertThat(employee.displayName()).isEqualTo("新姓名");
+                    assertThat(employee.employmentStatus()).isEqualTo("ACTIVE");
+                });
+    }
+
+    /**
      * 验证空快照失败时不会把已有在职员工批量标记为离职。
      */
     @Test
@@ -148,24 +252,43 @@ class EhrSyncServiceImplIntegrationTest {
     }
 
     /**
-     * 验证人员级日志包含脱敏身份、处理结果和同步时间，且不会输出姓名或手机号。
+     * 验证同步日志包含阶段、批次、线程和进度，且不会逐人输出成功日志或个人信息。
      *
      * @param output 当前测试方法捕获的控制台日志
      */
     @Test
-    void fullSyncLogsMaskedEmployeeResultAndSynchronizationTime(CapturedOutput output) {
+    void fullSyncLogsPhaseBatchThreadAndProgressWithoutPerEmployeeSuccess(
+            CapturedOutput output) {
         ehrManager.snapshot = snapshot(List.of(
                 employee("PERSON-LOG-100", "EMPLOYEE-LOG-100",
-                        "日志验证姓名", null)));
+                        "日志验证姓名", null),
+                employee("PERSON-LOG-101", "EMPLOYEE-LOG-101",
+                        "日志验证姓名二", null),
+                employee("PERSON-LOG-102", "EMPLOYEE-LOG-102",
+                        "日志验证姓名三", null)));
 
         ehrSyncService.executeFullSync("MANUAL", "manual-log-success");
 
         assertThat(output.getOut())
-                .contains("event=ehr_employee_sync_item_succeeded")
-                .contains("employeeNoMasked=****-100")
-                .contains("organizationCode=D-1")
-                .contains("syncResult=INSERTED")
-                .contains("synchronizedAt=")
+                .contains("event=ehr_sync_stage_started")
+                .contains("stage=FETCHING")
+                .contains("stage=VALIDATING")
+                .contains("stage=EMPLOYEE_UPSERT")
+                .contains("stage=SUPERVISOR_LINKING")
+                .contains("stage=DEFAULT_ROLE_INITIALIZING")
+                .contains("stage=RECONCILING")
+                .contains("stage=FINALIZING")
+                .contains("thread=")
+                .contains("event=ehr_sync_stage_progress")
+                .contains("batchNo=1")
+                .contains("batchNo=2")
+                .contains("totalBatches=2")
+                .contains("processedRecords=3")
+                .contains("totalRecords=3")
+                .contains("remainingBatches=0")
+                .contains("remainingRecords=0")
+                .contains("progressPercent=100")
+                .doesNotContain("event=ehr_employee_sync_item_succeeded")
                 .doesNotContain("日志验证姓名")
                 .doesNotContain("13800138000");
     }
@@ -211,12 +334,27 @@ class EhrSyncServiceImplIntegrationTest {
 
         assertThat(run.status()).isEqualTo("PARTIAL_SUCCEEDED");
         assertThat(run.insertedCount()).isOne();
-        assertThat(run.issueCount()).isZero();
+        assertThat(run.issueCount()).isOne();
         assertThat(testMapper.selectEmployees()).hasSize(1);
-        assertThat(testMapper.countSyncIssues()).isZero();
-        assertThat(testMapper.selectInitialSyncCompleted()).isFalse();
+        assertThat(testMapper.countSyncIssues()).isOne();
+        assertThat(testMapper.selectSyncIssues()).singleElement()
+                .satisfies(issue -> {
+                    assertThat(issue.employeeNo()).isEqualTo("E-INVALID");
+                    assertThat(issue.failureStage()).isEqualTo("VALIDATING");
+                    assertThat(issue.issueCode()).isEqualTo("EHR_MOBILE_INVALID");
+                });
+        assertThat(ehrSyncService.listIssues(run.id(), 0, 10)).singleElement()
+                .satisfies(issue -> {
+                    assertThat(issue.employeeNo()).isEqualTo("E-INVALID");
+                    assertThat(issue.failureStage()).isEqualTo("VALIDATING");
+                    assertThat(issue.issueCode()).isEqualTo("EHR_MOBILE_INVALID");
+                });
+        assertThat(testMapper.selectInitialSyncCompleted()).isTrue();
         assertThat(output.getOut())
                 .contains("event=ehr_employee_sync_item_failed")
+                .contains("event=ehr_sync_issue_summary")
+                .contains("totalIssues=1")
+                .contains("validationFailures=1")
                 .contains("employeeNoMasked=****ALID")
                 .contains("failureStage=VALIDATING")
                 .contains("failureReason=EHR snapshot contains an invalid mobile number")
@@ -225,51 +363,46 @@ class EhrSyncServiceImplIntegrationTest {
     }
 
     /**
-     * 验证单个人员落库违反唯一约束时只回滚该人员，并暂停本批次离职对账。
+     * 验证来源人员标识变化时，相同工号仍更新同一员工。
      *
      * @param output 当前测试方法捕获的控制台日志
      */
     @Test
-    void persistenceFailureIsIsolatedAndDoesNotResignExistingEmployee(
+    void sameEmployeeNumberUpdatesSameEmployeeWhenSourcePersonIdChanges(
             CapturedOutput output) {
         ehrManager.snapshot = snapshot(List.of(
                 employee("P-EXISTING", "E-COLLISION", "已有人员", null)));
         ehrSyncService.executeFullSync("MANUAL", "manual-seed-collision");
 
-        /*
-         * 新 EHR 人员复用了数据库中已有工号，触发员工唯一约束；同批另一名人员应正常写入。
-         * 因本批存在问题，未出现在快照中的已有人员不能被误判为离职。
-         */
         ehrManager.snapshot = snapshot(List.of(
-                employee("P-DB-FAIL", "E-COLLISION", "冲突人员", null),
+                employee("P-DB-CHANGED", "E-COLLISION", "更新人员", null),
                 employee("P-DB-VALID", "E-NEW", "正常人员", null)));
 
         EhrSyncRunDTO run = ehrSyncService.executeFullSync(
                 "MANUAL", "manual-persistence-partial");
 
-        assertThat(run.status()).isEqualTo("PARTIAL_SUCCEEDED");
+        assertThat(run.status()).isEqualTo("SUCCEEDED");
         assertThat(run.insertedCount()).isOne();
+        assertThat(run.updatedCount()).isOne();
         assertThat(run.resignedCount()).isZero();
         assertThat(run.issueCount()).isZero();
         assertThat(testMapper.countSyncIssues()).isZero();
         assertThat(testMapper.selectEmployees())
-                .extracting(EhrSyncTestMapper.EmployeeProjection::ehrPersonId)
-                .containsExactlyInAnyOrder("P-EXISTING", "P-DB-VALID");
+                .extracting(EhrSyncTestMapper.EmployeeProjection::employeeNo)
+                .containsExactlyInAnyOrder("E-COLLISION", "E-NEW");
         assertThat(testMapper.selectEmployees())
-                .filteredOn(employee -> employee.ehrPersonId().equals("P-EXISTING"))
+                .filteredOn(employee -> employee.employeeNo().equals("E-COLLISION"))
                 .singleElement()
                 .satisfies(employee -> {
+                    assertThat(employee.displayName()).isEqualTo("更新人员");
                     assertThat(employee.employmentStatus()).isEqualTo("ACTIVE");
                     assertThat(employee.accountStatus()).isEqualTo("ACTIVE");
                 });
         assertThat(output.getOut())
-                .contains("event=ehr_employee_sync_item_failed")
-                .contains("employeeNoMasked=****SION")
-                .contains("failureStage=PERSISTING")
-                .contains("failureCode=EHR_EMPLOYEE_NO_CONFLICT")
-                .contains("failureReason=EHR employee number is already assigned "
-                        + "to another person")
-                .doesNotContain("冲突人员");
+                .contains("event=ehr_sync_stage_progress")
+                .contains("stage=EMPLOYEE_UPSERT")
+                .doesNotContain("EHR_EMPLOYEE_NO_CONFLICT")
+                .doesNotContain("更新人员");
     }
 
     /**
@@ -291,10 +424,10 @@ class EhrSyncServiceImplIntegrationTest {
 
         assertThat(run.status()).isEqualTo("PARTIAL_SUCCEEDED");
         assertThat(run.insertedCount()).isOne();
-        assertThat(run.issueCount()).isZero();
+        assertThat(run.issueCount()).isOne();
         assertThat(testMapper.selectEmployees())
                 .extracting(EhrSyncTestMapper.EmployeeProjection::ehrPersonId)
-                .containsExactly("P-AFTER-ERROR");
+                .containsExactly("E-AFTER-ERROR");
         assertThat(output.getOut())
                 .contains("event=ehr_employee_sync_item_failed")
                 .contains("employeeNoMasked=****RROR")
@@ -306,6 +439,18 @@ class EhrSyncServiceImplIntegrationTest {
 
     private EhrEmployeeSnapshotDTO snapshot(List<EhrEmployeeSourceDTO> employees) {
         return new EhrEmployeeSnapshotDTO(employees.size(), 1, employees);
+    }
+
+    private EhrSyncRunDTO awaitRunStatus(long runId, String expectedStatus)
+            throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        EhrSyncRunDTO current = ehrSyncService.getRun(runId);
+        while (!expectedStatus.equals(current.status())
+                && System.nanoTime() < deadlineNanos) {
+            Thread.sleep(10);
+            current = ehrSyncService.getRun(runId);
+        }
+        return current;
     }
 
     private EhrEmployeeSourceDTO employee(String ehrPersonId, String employeeNo,
@@ -354,9 +499,42 @@ class EhrSyncServiceImplIntegrationTest {
 
     static final class StubEhrEmployeeManager implements EhrEmployeeManager {
         private EhrEmployeeSnapshotDTO snapshot;
+        private volatile CountDownLatch fetchStarted = new CountDownLatch(0);
+        private volatile CountDownLatch fetchRelease = new CountDownLatch(0);
+        private volatile String fetchThreadName;
+
+        void blockNextFetch() {
+            fetchStarted = new CountDownLatch(1);
+            fetchRelease = new CountDownLatch(1);
+        }
+
+        boolean awaitFetchStarted() throws InterruptedException {
+            return fetchStarted.await(5, TimeUnit.SECONDS);
+        }
+
+        void releaseFetch() {
+            fetchRelease.countDown();
+        }
+
+        void resetBlocking() {
+            releaseFetch();
+            fetchStarted = new CountDownLatch(0);
+            fetchRelease = new CountDownLatch(0);
+            fetchThreadName = null;
+        }
 
         @Override
         public EhrEmployeeSnapshotDTO fetchActiveEmployeeSnapshot() {
+            fetchThreadName = Thread.currentThread().getName();
+            fetchStarted.countDown();
+            try {
+                if (!fetchRelease.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting to release EHR fetch");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("EHR fetch was interrupted", exception);
+            }
             return snapshot;
         }
     }

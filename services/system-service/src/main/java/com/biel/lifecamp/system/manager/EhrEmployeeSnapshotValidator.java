@@ -49,13 +49,11 @@ public final class EhrEmployeeSnapshotValidator {
             throw new EhrSyncException("EHR_SNAPSHOT_COUNT_MISMATCH",
                     "EHR snapshot record count does not match declared total record count");
         }
-        Set<String> personIds = new HashSet<>();
         Set<String> employeeNumbers = new HashSet<>();
         List<EhrEmployeeUpsertDTO> employees = new ArrayList<>(snapshot.employees().size());
         List<EhrEmployeeSyncIssueDTO> issues = new ArrayList<>();
         for (EhrEmployeeSourceDTO source : snapshot.employees()) {
             try {
-                String personId = required(source.ehrPersonId(), "ehr person id");
                 String employeeNo = required(source.employeeNo(), "employee number");
                 String displayName = required(source.displayName(), "display name");
 
@@ -64,19 +62,15 @@ public final class EhrEmployeeSnapshotValidator {
                  * 后面相同身份但内容有效的人员，且每个失败人员都能独立记录。
                  */
                 EhrEmployeeUpsertDTO employee =
-                        toUpsert(source, personId, employeeNo, displayName);
-                if (personIds.contains(personId)) {
-                    throw duplicate("ehr person id");
-                }
+                        toUpsert(source, employeeNo, displayName);
                 if (employeeNumbers.contains(employeeNo)) {
                     throw duplicate("employee number");
                 }
-                personIds.add(personId);
                 employeeNumbers.add(employeeNo);
                 employees.add(employee);
             } catch (EhrSyncException exception) {
                 issues.add(new EhrEmployeeSyncIssueDTO(
-                        exception.code(), trimToNull(source.ehrPersonId()),
+                        exception.code(), trimToNull(source.employeeNo()),
                         trimToNull(source.employeeNo()), exception.getMessage(),
                         "VALIDATING"));
             }
@@ -89,17 +83,15 @@ public final class EhrEmployeeSnapshotValidator {
      * 将已经通过身份唯一性检查的来源人员转换为持久化模型。
      *
      * @param source EHR 来源人员
-     * @param personId 已清理的 EHR 人员标识
      * @param employeeNo 已清理的工号
      * @param displayName 已清理的姓名
      * @return 可写入员工投影的数据
      */
     private EhrEmployeeUpsertDTO toUpsert(EhrEmployeeSourceDTO source,
-                                          String personId,
                                           String employeeNo,
                                           String displayName) {
         return new EhrEmployeeUpsertDTO(
-                personId, employeeNo, displayName, normalizeGender(source.gender()),
+                employeeNo, displayName, normalizeGender(source.gender()),
                 trimToNull(source.gender()), parseDate(source.birthday()),
                 normalizeMobile(source.mobile()), trimToNull(source.email()),
                 trimToNull(source.departmentCode()), trimToNull(source.departmentName()),

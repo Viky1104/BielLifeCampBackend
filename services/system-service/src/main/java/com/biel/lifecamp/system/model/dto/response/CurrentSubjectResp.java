@@ -10,7 +10,7 @@ import java.util.List;
  * @param employeeId 员工标识
  * @param employeeNo 员工编号
  * @param displayName 员工显示名称
- * @param organizationId 主组织标识
+ * @param organizationId 本地主组织标识；组织主数据尚未解析时为 0
  * @param roles 当前生效的角色编码
  * @param permissions 系统服务权限编码
  * @param dataScopes 当前生效的数据范围
@@ -27,7 +27,7 @@ public record CurrentSubjectResp(
         String employeeNo,
         @Schema(description = "员工显示名称", example = "张三")
         String displayName,
-        @Schema(description = "主组织数据库主键的十进制字符串",
+        @Schema(description = "主组织数据库主键的十进制字符串；组织主数据尚未解析时为 0",
                 example = "1900000000000000100")
         String organizationId,
         @Schema(description = "当前生效的角色编码", example = "[\"EMPLOYEE\"]")

@@ -30,6 +30,29 @@ public class EhrConfiguration {
     private static final int MAX_PERSISTENCE_BATCH_SIZE = 1000;
 
     /**
+     * 创建 EHR 同步编排专用的单线程有界执行器。
+     *
+     * <p>同一时刻只允许一个全量同步进入业务编排，队列仅保留一个待执行任务，避免人工重复提交
+     * 无限制占用内存。跨实例互斥仍由数据库任务租约保证。</p>
+     *
+     * @return EHR 同步编排执行器
+     */
+    @Bean(name = "ehrSyncTaskExecutor")
+    ThreadPoolTaskExecutor ehrSyncTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(1);
+        executor.setKeepAliveSeconds(30);
+        executor.setAllowCoreThreadTimeOut(true);
+        executor.setThreadNamePrefix("ehr-sync-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationMillis(30_000L);
+        return executor;
+    }
+
+    /**
      * 创建 EHR 分页专用的有界线程池。
      *
      * <p>线程数和队列容量都受 pageConcurrency 限制。同步编排层还会采用滑动窗口，

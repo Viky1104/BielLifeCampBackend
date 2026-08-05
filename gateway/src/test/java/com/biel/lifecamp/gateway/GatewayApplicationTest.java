@@ -1,7 +1,6 @@
 package com.biel.lifecamp.gateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.cloud.gateway.support.RouteMetadataUtils.RESPONSE_TIMEOUT_ATTR;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
@@ -57,9 +56,7 @@ class GatewayApplicationTest {
         Map<String, URI> routeTargets = routeLocator.getRoutes()
                 .collectMap(route -> route.getId(), route -> route.getUri()).block();
 
-        assertThat(routeTargets).hasSize(19)
-                .containsEntry("system-service-ehr-sync",
-                        URI.create("lb://system-service"))
+        assertThat(routeTargets).hasSize(18)
                 .containsEntry("system-service", URI.create("lb://system-service"))
                 .containsEntry("communication-service",
                         URI.create("lb://communication-service"))
@@ -70,13 +67,6 @@ class GatewayApplicationTest {
                 .containsEntry("mall-service", URI.create("lb://mall-service"))
                 .containsEntry("life-service", URI.create("lb://life-service"))
                 .containsEntry("order-view-service", URI.create("lb://order-view-service"));
-        Map<String, Object> ehrSyncMetadata = routeLocator.getRoutes()
-                .filter(route -> "system-service-ehr-sync".equals(route.getId()))
-                .single().block().getMetadata();
-        assertThat(ehrSyncMetadata).containsKey(RESPONSE_TIMEOUT_ATTR);
-        assertThat(ehrSyncMetadata.get(RESPONSE_TIMEOUT_ATTR)).isInstanceOf(Number.class);
-        assertThat(((Number) ehrSyncMetadata.get(RESPONSE_TIMEOUT_ATTR)).longValue())
-                .isEqualTo(Duration.ofMinutes(10).toMillis());
     }
 
     /**

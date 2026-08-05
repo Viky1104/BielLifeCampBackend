@@ -87,9 +87,64 @@ class AuthorizationCacheManagerTest {
         assertThat(manager.findCurrentVersion(1001L)).hasValue(3L);
     }
 
+    /**
+     * 验证组织主数据尚未映射时，授权缓存使用 0 表示未解析组织。
+     */
+    @Test
+    void savesUnresolvedOrganizationAsZero() {
+        AuthorizationCacheStore store = mock(AuthorizationCacheStore.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<AuthorizationCacheStore> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(store);
+        AuthorizationCacheProperties properties = new AuthorizationCacheProperties();
+        properties.setEnabled(true);
+        AuthorizationCacheManager manager =
+                new AuthorizationCacheManager(provider, properties);
+
+        manager.saveAuthorization(
+                snapshot(null), "system-service", Instant.parse("2026-08-05T08:00:00Z"));
+
+        ArgumentCaptor<CachedAuthorization> captor =
+                ArgumentCaptor.forClass(CachedAuthorization.class);
+        verify(store).save(captor.capture());
+        assertThat(captor.getValue().organizationId()).isEqualTo("0");
+    }
+
+    /**
+     * 验证组织主数据尚未映射时，仍能命中以 0 标识组织的授权缓存。
+     */
+    @Test
+    void readsCachedAuthorizationForUnresolvedOrganization() {
+        AuthorizationCacheStore store = mock(AuthorizationCacheStore.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<AuthorizationCacheStore> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(store);
+        AuthorizationCacheProperties properties = new AuthorizationCacheProperties();
+        properties.setEnabled(true);
+        AuthorizationCacheManager manager =
+                new AuthorizationCacheManager(provider, properties);
+        AuthorizationSnapshotDTO snapshot = snapshot(null);
+        when(store.find("1001", "system-service", 3L))
+                .thenReturn(Optional.of(new CachedAuthorization(
+                        "1001", "E1001", "Test Employee", "0",
+                        "system-service", 3L,
+                        java.util.Set.of("EMPLOYEE"),
+                        java.util.Set.of("system:profile:read"),
+                        List.of(new com.biel.lifecamp.starter.security.IdentityContext.DataScope(
+                                "SELF", "1001")),
+                        Instant.parse("2026-08-05T08:00:00Z"))));
+
+        assertThat(manager.findAuthorization(
+                snapshot.employee(), "system-service")).isPresent();
+    }
+
     private AuthorizationSnapshotDTO snapshot() {
+        return snapshot(2001L);
+    }
+
+    private AuthorizationSnapshotDTO snapshot(Long organizationId) {
         return new AuthorizationSnapshotDTO(
-                new EmployeeDTO(1001L, "E1001", "Test Employee", 2001L,
+                new EmployeeDTO(1001L, "E1001", "Test Employee", organizationId,
                         "ACTIVE", "ACTIVE", 3L),
                 List.of("EMPLOYEE"),
                 List.of("system:profile:read"),

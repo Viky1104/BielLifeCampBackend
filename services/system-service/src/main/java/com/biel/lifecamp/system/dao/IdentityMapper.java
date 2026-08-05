@@ -27,9 +27,11 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface IdentityMapper {
     /**
-     * 查询权威 EHR 首次同步是否已经完成。
+     * 查询权威 EHR 是否已经产生可用于登录的人员数据。
      *
-     * @return 已完成时返回 {@code true}
+     * <p>除集成状态外，也兼容已经成功或部分成功、且至少落库一名员工的历史同步运行。</p>
+     *
+     * @return 已产生可用人员数据时返回 {@code true}
      */
     Boolean selectInitialEhrSyncCompleted();
 

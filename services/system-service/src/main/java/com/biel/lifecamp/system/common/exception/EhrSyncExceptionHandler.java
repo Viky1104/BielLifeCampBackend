@@ -28,8 +28,11 @@ final class EhrSyncExceptionHandler {
      */
     @ExceptionHandler(EhrSyncException.class)
     ResponseEntity<ApiResponse<Void>> ehrSync(EhrSyncException exception) {
-        HttpStatus status = "EHR_SYNC_ALREADY_RUNNING".equals(exception.code())
-                ? HttpStatus.CONFLICT : HttpStatus.BAD_REQUEST;
+        HttpStatus status = switch (exception.code()) {
+            case "EHR_SYNC_ALREADY_RUNNING" -> HttpStatus.CONFLICT;
+            case "EHR_SYNC_QUEUE_FULL" -> HttpStatus.SERVICE_UNAVAILABLE;
+            default -> HttpStatus.BAD_REQUEST;
+        };
         return ResponseEntity.status(status).body(
                 ApiResponse.failure(exception.code(), exception.getMessage()));
     }

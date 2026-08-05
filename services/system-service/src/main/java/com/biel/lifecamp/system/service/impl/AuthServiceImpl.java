@@ -107,7 +107,7 @@ public class AuthServiceImpl implements AuthService {
     @Transactional(noRollbackFor = AuthException.class)
     public TokenPairDTO login(String loginCode, String phoneCode) {
         requireEnabled();
-        // 用户来源以 EHR 为唯一权威源，首次全量同步完成前禁止建立本地身份绑定。
+        // 用户来源以 EHR 为唯一权威源；已有可用人员投影后即可建立本地身份绑定。
         if (authProperties.isEhrRequireInitialSync()
                 && !Boolean.TRUE.equals(identityMapper.selectInitialEhrSyncCompleted())) {
             throw AuthException.unavailable("AUTH_EHR_INITIAL_SYNC_REQUIRED");

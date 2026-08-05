@@ -16,15 +16,16 @@ public class EhrProperties {
 
     /** EHR 人员查询接口地址。 */
     private String url = "http://esb.biel.com/api/esb/EHR_GetData";
+//    private String url = "http://10.80.69.105:8180/ehrapi/hrhi/getpsninfo/page";
 
     /** ESB 调用方系统编码。 */
-    private String sourceSystem = "WeChat";
+    private String sourceSystem = "BMP";
 
     /** ESB 目标系统编码。 */
-    private String targetSystem = "EHR-Micro";
+    private String targetSystem = "EHR";
 
     /** ESB 人员查询服务名称。 */
-    private String serviceName = "ehr-micro-getpsninfo";
+    private String serviceName = "EHR-getpsninfo";
 
     /** ESB 路由标识。 */
     private String routeId = "HZ";
@@ -33,7 +34,7 @@ public class EhrProperties {
     private String auth;
 
     /** 全量同步使用的最早变更时间。 */
-    private String fullSince = "2000-01-01 00:00:00";
+    private String fullSince = "2000-01-01";
 
     /** EHR 单页人员数量。 */
     private int pageSize = 1000;

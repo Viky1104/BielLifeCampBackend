@@ -16,6 +16,27 @@
         WHERE connection_code = 'EHR'
     </update>
 
+    <update id="resetInitialEhrSync">
+        UPDATE sys_integration_state
+        SET initial_sync_completed = FALSE
+        WHERE connection_code = 'EHR'
+    </update>
+
+    <insert id="insertPartialEhrSyncRun">
+        INSERT INTO sys_ehr_sync_run
+            (id, idempotency_key, run_type, trigger_type, status,
+             fetched_count, inserted_count, updated_count, issue_count,
+             completed_at, created_at)
+        VALUES
+            (990001, 'auth-partial-sync-ready', 'FULL_RECONCILIATION',
+             'MANUAL', 'PARTIAL_SUCCEEDED', 2, 1, 0, 1,
+             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    </insert>
+
+    <delete id="deleteAuthTestSyncRun">
+        DELETE FROM sys_ehr_sync_run WHERE id = 990001
+    </delete>
+
     <insert id="insertEmployee">
         INSERT INTO sys_employee
             (id, ehr_person_id, employee_no, display_name, mobile_hash,

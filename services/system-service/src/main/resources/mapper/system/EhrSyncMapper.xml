@@ -27,17 +27,22 @@
                type="com.biel.lifecamp.system.model.dto.EmployeeReferenceDTO">
         <constructor>
             <idArg column="id" javaType="java.lang.Long"/>
-            <arg column="ehr_person_id" javaType="java.lang.String"/>
             <arg column="employee_no" javaType="java.lang.String"/>
             <arg column="supervisor_employee_no" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
 
-    <resultMap id="employeeIdentityResultMap"
-               type="com.biel.lifecamp.system.model.dto.EmployeeIdentityDTO">
+    <resultMap id="syncIssueResultMap"
+               type="com.biel.lifecamp.system.model.dto.EhrSyncIssueDTO">
         <constructor>
-            <arg column="ehr_person_id" javaType="java.lang.String"/>
+            <idArg column="id" javaType="java.lang.Long"/>
+            <arg column="run_id" javaType="java.lang.Long"/>
+            <arg column="severity" javaType="java.lang.String"/>
+            <arg column="issue_code" javaType="java.lang.String"/>
             <arg column="employee_no" javaType="java.lang.String"/>
+            <arg column="failure_stage" javaType="java.lang.String"/>
+            <arg column="detail_digest" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
         </constructor>
     </resultMap>
 
@@ -91,6 +96,7 @@
             updated_count = #{result.updatedCount},
             resigned_count = #{result.resignedCount},
             role_initialized_count = #{result.roleInitializedCount},
+            issue_count = #{result.issueCount},
             completed_at = #{completedAt}
         WHERE id = #{runId} AND status = 'RUNNING'
     </update>
@@ -102,18 +108,30 @@
         WHERE id = #{runId} AND status IN ('PENDING', 'RUNNING')
     </update>
 
-    <select id="selectExistingEhrPersonIds" resultType="java.lang.String">
-        SELECT ehr_person_id
-        FROM sys_employee
-        WHERE ehr_person_id IN
-        <foreach collection="ehrPersonIds" item="personId" open="(" separator="," close=")">
-            #{personId}
+    <insert id="insertSyncIssueBatch">
+        INSERT INTO sys_ehr_sync_issue
+            (id, run_id, severity, issue_code, ehr_person_id, employee_no,
+             failure_stage, detail_digest, created_at)
+        VALUES
+        <foreach collection="issues" item="issue" separator=",">
+            (#{issue.id}, #{issue.runId}, #{issue.severity}, #{issue.issueCode},
+             NULL, #{issue.employeeNo}, #{issue.failureStage},
+             #{issue.detailDigest}, #{issue.createdAt})
         </foreach>
+    </insert>
+
+    <select id="selectSyncIssues" resultMap="syncIssueResultMap">
+        SELECT id, run_id, severity, issue_code, employee_no,
+               failure_stage, detail_digest, created_at
+        FROM sys_ehr_sync_issue
+        WHERE run_id = #{runId}
+          AND id &gt; #{afterId}
+        ORDER BY id
+        LIMIT #{limit}
     </select>
 
-    <select id="selectExistingEmployeeIdentities"
-            resultMap="employeeIdentityResultMap">
-        SELECT ehr_person_id, employee_no
+    <select id="selectExistingEmployeeNumbers" resultType="java.lang.String">
+        SELECT employee_no
         FROM sys_employee
         WHERE employee_no IN
         <foreach collection="employeeNumbers" item="employeeNo"
@@ -126,7 +144,7 @@
         INSERT INTO sys_ehr_employee_stage
             (run_id, ehr_person_id, employee_no, payload_digest)
         VALUES
-            (#{runId}, #{employee.ehrPersonId}, #{employee.employeeNo}, #{payloadDigest})
+            (#{runId}, #{employee.employeeNo}, #{employee.employeeNo}, #{payloadDigest})
     </insert>
 
     <insert id="insertStageBatch">
@@ -134,7 +152,7 @@
             (run_id, ehr_person_id, employee_no, payload_digest)
         VALUES
         <foreach collection="items" item="item" separator=",">
-            (#{runId}, #{item.employee.ehrPersonId},
+            (#{runId}, #{item.employee.employeeNo},
              #{item.employee.employeeNo}, #{item.payloadDigest})
         </foreach>
     </insert>
@@ -151,7 +169,7 @@
              hire_date, termination_date, ehr_created_at, ehr_modified_at,
              last_ehr_synced_at, created_at, updated_at)
         VALUES
-            (#{employee.ehrPersonId}, #{employee.employeeNo}, #{employee.displayName},
+            (#{employee.employeeNo}, #{employee.employeeNo}, #{employee.displayName},
              #{mobileHash}, NULL, #{employee.departmentCode}, #{employee.departmentName},
              #{employee.legalCompanyCode}, #{employee.legalCompanyName},
              'ACTIVE', 'UNBOUND', 'ACTIVE', 1, 'EHR',
@@ -204,7 +222,7 @@
              last_ehr_synced_at, created_at, updated_at)
         VALUES
         <foreach collection="items" item="item" separator=",">
-            (#{item.employee.ehrPersonId}, #{item.employee.employeeNo},
+            (#{item.employee.employeeNo}, #{item.employee.employeeNo},
              #{item.employee.displayName}, #{item.mobileHash},
              NULL, #{item.employee.departmentCode}, #{item.employee.departmentName},
              #{item.employee.legalCompanyCode}, #{item.employee.legalCompanyName},
@@ -249,10 +267,10 @@
     </insert>
 
     <select id="selectEmployeeReferences" resultMap="employeeReferenceResultMap">
-        SELECT e.id, e.ehr_person_id, e.employee_no, e.supervisor_employee_no
+        SELECT e.id, e.employee_no, e.supervisor_employee_no
         FROM sys_employee e
         INNER JOIN sys_ehr_employee_stage s
-                ON s.ehr_person_id = e.ehr_person_id
+                ON s.employee_no = e.employee_no
                AND s.run_id = #{runId}
     </select>
 
@@ -261,6 +279,42 @@
         SET supervisor_employee_id = #{supervisorEmployeeId}, updated_at = #{syncedAt}
         WHERE id = #{employeeId}
     </update>
+
+    <update id="updateSupervisorBatch">
+        UPDATE sys_employee
+        SET supervisor_employee_id = CASE id
+            <foreach collection="items" item="item">
+                WHEN #{item.employeeId} THEN #{item.supervisorEmployeeId}
+            </foreach>
+            END,
+            updated_at = #{syncedAt}
+        WHERE id IN
+        <foreach collection="items" item="item" open="(" separator="," close=")">
+            #{item.employeeId}
+        </foreach>
+    </update>
+
+    <select id="selectEmployeesMissingRole" resultMap="employeeReferenceResultMap">
+        SELECT e.id, e.employee_no, e.supervisor_employee_no
+        FROM sys_employee e
+        INNER JOIN sys_ehr_employee_stage s
+                ON s.employee_no = e.employee_no
+               AND s.run_id = #{runId}
+        INNER JOIN sys_role r ON r.role_code = #{roleCode}
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM sys_role_assignment a
+            WHERE a.employee_id = e.id
+              AND a.role_id = r.id
+        )
+        ORDER BY e.id
+    </select>
+
+    <select id="selectRoleId" resultType="java.lang.Long">
+        SELECT id
+        FROM sys_role
+        WHERE role_code = #{roleCode}
+    </select>
 
     <insert id="insertEmployeeRoleAssignment">
         INSERT INTO sys_role_assignment
@@ -277,6 +331,17 @@
           )
     </insert>
 
+    <insert id="insertEmployeeRoleAssignmentBatch">
+        INSERT INTO sys_role_assignment
+            (id, employee_id, role_id, scope_type, scope_value, status, created_at)
+        VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{item.id}, #{item.employeeId}, #{item.roleId}, 'SELF',
+             #{item.scopeValue}, 'ACTIVE', #{createdAt})
+        </foreach>
+        ON DUPLICATE KEY UPDATE id = id
+    </insert>
+
     <update id="markMissingEmployeesResigned">
         UPDATE sys_employee AS e
         SET employment_status = 'RESIGNED',
@@ -289,15 +354,18 @@
               SELECT 1
               FROM sys_ehr_employee_stage s
               WHERE s.run_id = #{runId}
-                AND s.ehr_person_id = e.ehr_person_id
+                AND s.employee_no = e.employee_no
           )
     </update>
 
-    <update id="completeIntegrationState">
-        UPDATE sys_integration_state
-        SET initial_sync_completed = TRUE,
+    <insert id="completeIntegrationState">
+        INSERT INTO sys_integration_state
+            (connection_code, initial_sync_completed,
+             last_successful_at, updated_at)
+        VALUES ('EHR', TRUE, #{completedAt}, #{completedAt})
+        ON DUPLICATE KEY UPDATE
+            initial_sync_completed = TRUE,
             last_successful_at = #{completedAt},
             updated_at = #{completedAt}
-        WHERE connection_code = 'EHR'
-    </update>
+    </insert>
 </mapper>

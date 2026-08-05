@@ -22,6 +22,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
@@ -35,6 +38,7 @@ import tools.jackson.databind.json.JsonMapper;
  * @author Biel Life Camp Team
  * @since 2026-07-31
  */
+@ExtendWith(OutputCaptureExtension.class)
 class EhrEmployeeManagerImplTest {
     private HttpServer httpServer;
     private ExecutorService httpExecutor;
@@ -63,7 +67,8 @@ class EhrEmployeeManagerImplTest {
      * 因而可以证明实现不是串行请求；服务端同时记录最大在途请求数，验证它不会超过配置值。</p>
      */
     @Test
-    void fetchesPagesConcurrentlyWithinBoundAndKeepsPageOrder() throws Exception {
+    void fetchesPagesConcurrentlyWithinBoundAndKeepsPageOrder(CapturedOutput output)
+            throws Exception {
         EhrProperties properties = properties(3, 10);
         CountDownLatch firstWindowStarted = new CountDownLatch(3);
         AtomicInteger inFlight = new AtomicInteger();
@@ -88,13 +93,24 @@ class EhrEmployeeManagerImplTest {
             return page(5, 5, pageNo);
         });
 
-        EhrEmployeeSnapshotDTO snapshot = manager.fetchActiveEmployeeSnapshot();
+        EhrEmployeeSnapshotDTO snapshot = manager.fetchActiveEmployeeSnapshot(9001L);
 
         assertThat(maxInFlight.get()).isEqualTo(3);
         assertThat(requestedPages).containsExactlyInAnyOrder(1, 2, 3, 4, 5);
         assertThat(snapshot.employees())
                 .extracting(employee -> employee.employeeNo())
                 .containsExactly("E-1", "E-2", "E-3", "E-4", "E-5");
+        assertThat(output.getOut())
+                .contains("event=ehr_page_fetch_started runId=9001")
+                .contains("pageNo=2")
+                .contains("thread=ehr-page-test-")
+                .contains("event=ehr_page_fetch_completed runId=9001")
+                .contains("event=ehr_page_progress runId=9001")
+                .contains("completedPages=5")
+                .contains("totalPages=5")
+                .contains("remainingPages=0")
+                .contains("remainingRecords=0")
+                .contains("progressPercent=100");
     }
 
     /**
@@ -138,6 +154,37 @@ class EhrEmployeeManagerImplTest {
         assertThat(requestedPages).allMatch(pageNo -> pageNo <= 4);
     }
 
+    /**
+     * ESB 将 JSON 标记为无字符集的文本时，UTF-8 中文人员字段仍应保持原值。
+     */
+    @Test
+    void preservesUtf8ChineseWhenResponseDoesNotDeclareCharset() throws Exception {
+        EhrProperties properties = properties(1, 1);
+        EhrEmployeeManagerImpl manager = manager(properties, pageNo -> """
+                {
+                  "code": "0",
+                  "data": {
+                    "totalRecords": 1,
+                    "totalPages": 1,
+                    "data": [{
+                      "code": "E-1",
+                      "name": "张三",
+                      "pkDeptName": "信息技术部",
+                      "pkJobname": "软件工程师"
+                    }]
+                  }
+                }
+                """, "text/plain");
+
+        EhrEmployeeSnapshotDTO snapshot = manager.fetchActiveEmployeeSnapshot();
+
+        assertThat(snapshot.employees()).singleElement().satisfies(employee -> {
+            assertThat(employee.displayName()).isEqualTo("张三");
+            assertThat(employee.departmentName()).isEqualTo("信息技术部");
+            assertThat(employee.jobName()).isEqualTo("软件工程师");
+        });
+    }
+
     private EhrProperties properties(int concurrency, int maxRecords) {
         EhrProperties properties = new EhrProperties();
         properties.setPageSize(1);
@@ -155,11 +202,17 @@ class EhrEmployeeManagerImplTest {
      */
     private EhrEmployeeManagerImpl manager(
             EhrProperties properties, PageResponder responder) throws IOException {
+        return manager(properties, responder, "application/json;charset=UTF-8");
+    }
+
+    private EhrEmployeeManagerImpl manager(
+            EhrProperties properties, PageResponder responder,
+            String responseContentType) throws IOException {
         httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         httpExecutor = Executors.newFixedThreadPool(6);
         httpServer.setExecutor(httpExecutor);
         httpServer.createContext("/employees",
-                exchange -> respond(exchange, responder));
+                exchange -> respond(exchange, responder, responseContentType));
         httpServer.start();
 
         pageExecutor = new ThreadPoolTaskExecutor();
@@ -179,14 +232,15 @@ class EhrEmployeeManagerImplTest {
                 pageExecutor.getThreadPoolExecutor());
     }
 
-    private void respond(HttpExchange exchange, PageResponder responder)
+    private void respond(HttpExchange exchange, PageResponder responder,
+                         String responseContentType)
             throws IOException {
         try {
             int pageNo = queryInt(exchange.getRequestURI(), "pageNo");
             String response = responder.respond(pageNo);
             byte[] body = response.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set(
-                    "Content-Type", "application/json;charset=UTF-8");
+                    "Content-Type", responseContentType);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
         } catch (InterruptedException exception) {

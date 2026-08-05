@@ -34,6 +34,15 @@ public interface AuthTestMapper {
     /** 将 EHR 首次同步标记为完成。 */
     void completeInitialEhrSync();
 
+    /** 将 EHR 首次同步门禁重置为未完成。 */
+    void resetInitialEhrSync();
+
+    /** 插入至少成功投影一名员工的部分成功同步运行。 */
+    void insertPartialEhrSyncRun();
+
+    /** 删除登录门禁兼容性测试创建的同步运行。 */
+    void deleteAuthTestSyncRun();
+
     /**
      * 插入员工测试数据。
      *

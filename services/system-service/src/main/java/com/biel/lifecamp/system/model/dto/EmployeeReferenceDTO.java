@@ -6,6 +6,6 @@ package com.biel.lifecamp.system.model.dto;
  * @author Biel Life Camp Team
  * @since 2026-07-29
  */
-public record EmployeeReferenceDTO(Long id, String ehrPersonId, String employeeNo,
+public record EmployeeReferenceDTO(Long id, String employeeNo,
                                    String supervisorEmployeeNo) {
 }

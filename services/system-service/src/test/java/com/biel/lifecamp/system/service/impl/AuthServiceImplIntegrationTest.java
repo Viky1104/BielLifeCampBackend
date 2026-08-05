@@ -63,6 +63,7 @@ class AuthServiceImplIntegrationTest {
         authTestMapper.deleteExternalIdentities();
         authTestMapper.deleteLocalCredentials();
         authTestMapper.deleteEmployees();
+        authTestMapper.deleteAuthTestSyncRun();
         authTestMapper.completeInitialEhrSync();
         authTestMapper.insertEmployee(new EmployeeSeed(
                 1001L, "ehr-1001", "E1001", "Test Employee",
@@ -123,6 +124,21 @@ class AuthServiceImplIntegrationTest {
 
         TokenPairDTO automatic = authService.login("another-login-code", null);
         assertThat(automatic.accessToken()).isNotEqualTo(first.accessToken());
+        assertThat(authTestMapper.countExternalIdentities()).isOne();
+    }
+
+    /**
+     * 验证历史部分成功运行已经产生可用员工时，即使集成状态行未更新也允许登录。
+     */
+    @Test
+    void partialEhrSyncWithProjectedEmployeeAllowsWechatLogin() {
+        authTestMapper.resetInitialEhrSync();
+        authTestMapper.insertPartialEhrSyncRun();
+
+        TokenPairDTO login = authService.login(
+                "login-code", "phone-code-123456");
+
+        assertThat(login.accessToken()).isNotBlank();
         assertThat(authTestMapper.countExternalIdentities()).isOne();
     }
 

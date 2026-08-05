@@ -310,10 +310,12 @@ CREATE TABLE sys_ehr_sync_issue (
     issue_code VARCHAR(64) NOT NULL COMMENT '问题类型编码',
     ehr_person_id VARCHAR(128) COMMENT '涉及的EHR人员稳定唯一标识',
     employee_no VARCHAR(64) COMMENT '涉及的员工工号',
+    failure_stage VARCHAR(40) NOT NULL DEFAULT 'UNKNOWN' COMMENT '人员失败阶段',
     detail_digest VARCHAR(500) NOT NULL COMMENT '脱敏后的问题详情摘要',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '问题记录创建时间',
     PRIMARY KEY (id),
-    KEY idx_sys_ehr_issue_run (run_id, severity)
+    KEY idx_sys_ehr_issue_run (run_id, severity),
+    KEY idx_sys_ehr_issue_run_id (run_id, id)
 ) ENGINE = InnoDB
   DEFAULT CHARACTER SET = utf8mb4
   COLLATE = utf8mb4_0900_ai_ci

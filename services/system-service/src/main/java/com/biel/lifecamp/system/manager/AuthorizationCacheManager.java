@@ -60,7 +60,7 @@ public final class AuthorizationCacheManager {
                 || !cached.targetService().equals(targetService)
                 || cached.authzVersion() != employee.authzVersion()
                 || !cached.organizationId().equals(
-                        Long.toString(employee.organizationId()))) {
+                        employee.organizationIdValue())) {
             throw new AuthorizationCacheAccessException(
                     "Authorization cache does not match its lookup scope",
                     new IllegalStateException("Authorization cache scope mismatch"));
@@ -90,7 +90,7 @@ public final class AuthorizationCacheManager {
                 Long.toString(snapshot.employee().id()),
                 snapshot.employee().employeeNo(),
                 snapshot.employee().displayName(),
-                Long.toString(snapshot.employee().organizationId()),
+                snapshot.employee().organizationIdValue(),
                 targetService,
                 snapshot.employee().authzVersion(),
                 Set.copyOf(snapshot.roles()),
