@@ -5,6 +5,7 @@ import com.biel.lifecamp.starter.web.ApiResponse;
 import com.biel.lifecamp.system.common.exception.AuthException;
 import com.biel.lifecamp.system.config.SystemOpenApiConfiguration;
 import com.biel.lifecamp.system.model.dto.AuthorizationSnapshotDTO;
+import com.biel.lifecamp.system.model.dto.CurrentProfileViewDTO;
 import com.biel.lifecamp.system.model.dto.ResolvedSessionContextDTO;
 import com.biel.lifecamp.system.model.dto.EmployeeDTO;
 import com.biel.lifecamp.system.model.dto.TokenPairDTO;
@@ -15,6 +16,7 @@ import com.biel.lifecamp.system.model.dto.request.WechatLoginReq;
 import com.biel.lifecamp.system.model.dto.response.CurrentSubjectResp;
 import com.biel.lifecamp.system.model.dto.response.SessionContextResp;
 import com.biel.lifecamp.system.service.AuthService;
+import com.biel.lifecamp.system.service.ProfileService;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -44,9 +46,11 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "认证与会话")
 public final class AuthController {
     private final AuthService authService;
+    private final ProfileService profileService;
 
-    AuthController(AuthService authService) {
+    AuthController(AuthService authService, ProfileService profileService) {
         this.authService = authService;
+        this.profileService = profileService;
     }
 
     /**
@@ -233,11 +237,16 @@ public final class AuthController {
         AuthorizationSnapshotDTO snapshot = authService.current(
                 Long.parseLong(identity.employeeId()), "system-service");
         EmployeeDTO employee = snapshot.employee();
+        CurrentProfileViewDTO profile = profileService.current(employee.id());
         return ApiResponse.success(new CurrentSubjectResp(
                 Long.toString(employee.id()),
                 employee.employeeNo(),
                 employee.displayName(),
+                profile.nickname(),
+                profile.avatarUrl(),
                 employee.organizationIdValue(),
+                profile.organizationName(),
+                profile.positionName(),
                 snapshot.roles(),
                 snapshot.permissions(),
                 snapshot.dataScopes(),

@@ -1,15 +1,28 @@
 nameOverride: ""
 replicaCount: 2
+podAnnotations: {}
 image:
   repository: registry.example.invalid/lifecamp/service
   digest: ""
   pullPolicy: IfNotPresent
+imagePullSecrets: []
 service:
   port: 8080
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  host: ""
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: false
+    secretName: ""
 resources:
   requests: {cpu: 500m, memory: 1Gi}
   limits: {cpu: "1", memory: 2Gi}
 autoscaling:
+  enabled: true
   minReplicas: 2
   maxReplicas: 4
   targetCPUUtilizationPercentage: 70
@@ -17,8 +30,21 @@ pdb:
   minAvailable: 1
 config:
   springProfilesActive: nacos
-  nacosServerAddr: nacos-headless.platform-infra.svc:8848
+  nacosEnabled: true
+  nacosServerAddr: nacos.biel-life-camp.svc.cluster.local:8848
+  nacosNamespace: dev
+  nacosGroup: LIFECAMP
+  nacosClusterName: DEFAULT
+  nacosLoadBalancerEnabled: false
 secretRef: ""
+additionalSecretRefs: []
+secretVolumes: []
+networkPolicy:
+  externalTcpPorts: [80, 443, 3306]
 migration:
   enabled: false
   image: ""
+  command: []
+  args: []
+  baselineOnMigrate: false
+  baselineVersion: "1"

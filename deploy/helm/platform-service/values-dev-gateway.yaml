@@ -1,0 +1,58 @@
+nameOverride: gateway
+replicaCount: 2
+
+image:
+  repository: boen-registry-vpc.cn-shenzhen.cr.aliyuncs.com/biel_client/lifecamp-gateway
+  digest: sha256:9c93881f72acdcc0a89afdcea33084f01bde40cda520f693320fe6278ed5ae93
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: acr-credential-secret-aggregation
+
+service:
+  port: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "3m"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  host: lifecamp-test.bielcrystal.com
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: true
+    secretName: 20261122bielcrystal.com
+
+resources:
+  requests: {cpu: 250m, memory: 512Mi}
+  limits: {cpu: "1", memory: 1Gi}
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+
+config:
+  springProfilesActive: nacos
+  nacosEnabled: true
+  nacosServerAddr: nacos.biel-life-camp.svc.cluster.local:8848
+  nacosNamespace: dev
+  nacosGroup: LIFECAMP
+  nacosClusterName: ACK
+  nacosLoadBalancerEnabled: true
+
+secretRef: gateway-dev-secret
+secretVolumes:
+  - name: runtime-keys
+    secretName: lifecamp-rsa-keys
+    mountPath: /run/secrets/lifecamp
+
+networkPolicy:
+  externalTcpPorts: [80, 443]

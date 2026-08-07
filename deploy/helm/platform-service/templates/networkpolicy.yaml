@@ -15,4 +15,7 @@ spec:
         - namespaceSelector: {}
     - to:
         - ipBlock: {cidr: 0.0.0.0/0}
-      ports: [{protocol: TCP, port: 443}]
+      ports:
+      {{- range .Values.networkPolicy.externalTcpPorts }}
+        - {protocol: TCP, port: {{ . }}}
+      {{- end }}

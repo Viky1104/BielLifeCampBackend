@@ -10,6 +10,12 @@ import com.biel.lifecamp.system.dao.AuthTestMapper;
 import com.biel.lifecamp.system.dao.AuthTestMapper.EmployeeSeed;
 import com.biel.lifecamp.system.model.dto.TokenPairDTO;
 import com.biel.lifecamp.system.service.AuthService;
+import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -158,6 +164,46 @@ class AuthServiceImplIntegrationTest {
     }
 
     /**
+     * 验证同一代刷新令牌并发轮换时只有一个请求成功，另一个按重放撤销会话。
+     *
+     * @throws Exception 并发任务未能在测试时限内完成时抛出
+     */
+    @Test
+    void concurrentRefreshAllowsOnlyOneRotation() throws Exception {
+        TokenPairDTO login = authService.login("login-code", "phone-code-123456");
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                2, 2, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(2), runnable -> {
+                    Thread thread = new Thread(runnable);
+                    thread.setName("auth-refresh-test");
+                    thread.setDaemon(true);
+                    return thread;
+                }, new ThreadPoolExecutor.AbortPolicy());
+        try {
+            Future<RefreshAttempt> first = executor.submit(
+                    () -> refreshAfterSignal(login.refreshToken(), ready, start));
+            Future<RefreshAttempt> second = executor.submit(
+                    () -> refreshAfterSignal(login.refreshToken(), ready, start));
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            List<RefreshAttempt> results = List.of(
+                    first.get(10, TimeUnit.SECONDS),
+                    second.get(10, TimeUnit.SECONDS));
+
+            assertThat(results).filteredOn(RefreshAttempt::succeeded).hasSize(1);
+            assertThat(results).extracting(RefreshAttempt::failureCode)
+                    .containsExactlyInAnyOrder(null, "AUTH_REFRESH_REPLAYED");
+            assertThat(authTestMapper.countRevokedSessions()).isOne();
+        } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    /**
      * 验证 EHR 中不存在的手机号不能创建本地员工或身份绑定。
      */
     @Test
@@ -169,6 +215,26 @@ class AuthServiceImplIntegrationTest {
                 .isEqualTo("AUTH_EHR_EMPLOYEE_NOT_FOUND");
         assertThat(authTestMapper.countExternalIdentities()).isZero();
         assertThat(authTestMapper.countEmployees()).isOne();
+    }
+
+    private RefreshAttempt refreshAfterSignal(
+            String refreshToken, CountDownLatch ready, CountDownLatch start) {
+        ready.countDown();
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Concurrent refresh start signal timed out");
+            }
+            authService.refresh(refreshToken);
+            return new RefreshAttempt(true, null);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Concurrent refresh test interrupted", exception);
+        } catch (AuthException exception) {
+            return new RefreshAttempt(false, exception.code());
+        }
+    }
+
+    private record RefreshAttempt(boolean succeeded, String failureCode) {
     }
 
     /**

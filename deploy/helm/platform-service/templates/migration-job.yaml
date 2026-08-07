@@ -5,14 +5,50 @@ metadata:
   name: {{ include "platform-service.name" . }}-migration
 spec:
   backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
   template:
     spec:
       restartPolicy: Never
       serviceAccountName: {{ include "platform-service.name" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: flyway
           image: {{ required "migration.image is required when migration is enabled" .Values.migration.image | quote }}
+          {{- with .Values.migration.command }}
+          command: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.migration.args }}
+          args: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - {name: SPRING_PROFILES_ACTIVE, value: {{ .Values.config.springProfilesActive | quote }}}
+            - {name: NACOS_ENABLED, value: {{ .Values.config.nacosEnabled | quote }}}
+            - {name: NACOS_SERVER_ADDR, value: {{ .Values.config.nacosServerAddr | quote }}}
+            - {name: NACOS_NAMESPACE, value: {{ .Values.config.nacosNamespace | quote }}}
+            - {name: NACOS_GROUP, value: {{ .Values.config.nacosGroup | quote }}}
+            - {name: NACOS_CLUSTER_NAME, value: {{ .Values.config.nacosClusterName | quote }}}
+            - {name: SPRING_FLYWAY_BASELINE_ON_MIGRATE, value: {{ .Values.migration.baselineOnMigrate | quote }}}
+            - {name: SPRING_FLYWAY_BASELINE_VERSION, value: {{ .Values.migration.baselineVersion | quote }}}
           {{- if .Values.secretRef }}
           envFrom: [{secretRef: {name: {{ .Values.secretRef | quote }}}}]
           {{- end }}
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: logs, mountPath: /logs}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+        - name: logs
+          emptyDir: {sizeLimit: 256Mi}
 {{- end }}

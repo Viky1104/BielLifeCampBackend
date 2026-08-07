@@ -1,0 +1,56 @@
+nameOverride: system-service
+replicaCount: 2
+podAnnotations:
+  lifecamp.bielcrystal.com/config-revision: "2026-08-06-oss-public-signed-url"
+
+image:
+  repository: boen-registry-vpc.cn-shenzhen.cr.aliyuncs.com/biel_client/lifecamp-system-service
+  digest: sha256:f9cd0db839f4ac9c60c50559ed10779fcf9ade822231751cdafd769ebee2cc72
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: acr-credential-secret-aggregation
+
+service:
+  port: 8081
+
+resources:
+  requests: {cpu: 500m, memory: 1Gi}
+  limits: {cpu: "2", memory: 2Gi}
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+
+config:
+  springProfilesActive: nacos
+  nacosEnabled: true
+  nacosServerAddr: nacos.biel-life-camp.svc.cluster.local:8848
+  nacosNamespace: dev
+  nacosGroup: LIFECAMP
+  nacosClusterName: ACK
+  nacosLoadBalancerEnabled: true
+
+secretRef: system-service-dev-secret
+additionalSecretRefs:
+  - system-service-oss-dev-secret
+secretVolumes:
+  - name: runtime-keys
+    secretName: lifecamp-rsa-keys
+    mountPath: /run/secrets/lifecamp
+
+networkPolicy:
+  externalTcpPorts: [80, 443, 3306]
+
+migration:
+  enabled: false
+  image: boen-registry-vpc.cn-shenzhen.cr.aliyuncs.com/biel_client/lifecamp-system-service@sha256:f9cd0db839f4ac9c60c50559ed10779fcf9ade822231751cdafd769ebee2cc72
+  command: ["java"]
+  args:
+    - -cp
+    - /app/resources:/app/classes:/app/libs/*
+    - com.biel.lifecamp.system.SystemServiceMigrationApplication
+  baselineOnMigrate: false
+  baselineVersion: "1"

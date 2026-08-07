@@ -2,9 +2,13 @@ spring:
   config:
     activate:
       on-profile: nacos
+    # nacos Profile 表示必须使用配置中心；缺少配置时直接终止启动。
     import:
-      - optional:nacos:${spring.application.name}.yaml?group=${NACOS_GROUP:LIFECAMP}&refreshEnabled=true
+      - nacos:${spring.application.name}.yaml?group=${NACOS_GROUP:LIFECAMP}&refreshEnabled=true
   cloud:
+    loadbalancer:
+      nacos:
+        enabled: ${NACOS_LOADBALANCER_ENABLED:true}
     nacos:
       server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
       username: ${NACOS_USERNAME:nacos}
@@ -13,6 +17,7 @@ spring:
         enabled: true
         namespace: ${NACOS_NAMESPACE:}
         group: ${NACOS_GROUP:LIFECAMP}
+        cluster-name: ${NACOS_CLUSTER_NAME:DEFAULT}
       config:
         enabled: true
         namespace: ${NACOS_NAMESPACE:}

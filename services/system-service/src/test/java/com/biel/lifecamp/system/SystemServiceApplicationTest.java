@@ -2,6 +2,8 @@ package com.biel.lifecamp.system;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -16,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -88,6 +91,28 @@ class SystemServiceApplicationTest {
                         "$.paths['/api/system/v1/me'].get.operationId")
                         .value("getCurrentSubject"))
                 .andExpect(jsonPath(
+                        "$.paths['/api/system/v1/me/profile'].patch.operationId")
+                        .value("updateCurrentProfile"))
+                .andExpect(jsonPath(
+                        "$.paths['/api/system/v1/me/profile/avatar'].post.operationId")
+                        .value("uploadCurrentProfileAvatar"))
+                .andExpect(jsonPath(
+                        "$.paths['/api/system/v1/me/profile/avatar'].post.requestBody.content"
+                                + ".['multipart/form-data'].schema.properties.avatar")
+                        .exists())
+                .andExpect(jsonPath(
+                        "$.components.schemas.CurrentSubject.properties.nickname")
+                        .exists())
+                .andExpect(jsonPath(
+                        "$.components.schemas.CurrentSubject.properties.avatarUrl")
+                        .exists())
+                .andExpect(jsonPath(
+                        "$.components.schemas.CurrentSubject.properties.organizationName")
+                        .exists())
+                .andExpect(jsonPath(
+                        "$.components.schemas.CurrentSubject.properties.positionName")
+                        .exists())
+                .andExpect(jsonPath(
                         "$.paths['/api/system/v1/ehr-sync-runs'].post.responses['202']")
                         .exists())
                 .andExpect(jsonPath(
@@ -137,6 +162,53 @@ class SystemServiceApplicationTest {
     }
 
     /**
+     * 验证昵称语义校验使用稳定的 422 错误码。
+     *
+     * @throws Exception MVC 请求执行失败时抛出
+     */
+    @Test
+    void invalidNicknameUsesProfileErrorContract() throws Exception {
+        mockMvc.perform(patch("/api/system/v1/me/profile")
+                        .requestAttr(IdentityContext.REQUEST_ATTRIBUTE, currentIdentity())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("PROFILE_NICKNAME_INVALID"))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    /**
+     * 验证伪造 Content-Type 不能绕过真实图片解码。
+     *
+     * @throws Exception MVC 请求执行失败时抛出
+     */
+    @Test
+    void malformedAvatarUsesProfileErrorContract() throws Exception {
+        MockMultipartFile avatar = new MockMultipartFile(
+                "avatar", "avatar.png", "image/png", new byte[]{1, 2, 3});
+        mockMvc.perform(multipart("/api/system/v1/me/profile/avatar")
+                        .file(avatar)
+                        .requestAttr(IdentityContext.REQUEST_ATTRIBUTE, currentIdentity()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("PROFILE_AVATAR_INVALID"))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    /**
+     * 验证缺少头像表单字段时仍返回资料接口的稳定错误码。
+     *
+     * @throws Exception MVC 请求执行失败时抛出
+     */
+    @Test
+    void missingAvatarPartUsesProfileErrorContract() throws Exception {
+        mockMvc.perform(multipart("/api/system/v1/me/profile/avatar")
+                        .requestAttr(IdentityContext.REQUEST_ATTRIBUTE, currentIdentity()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("PROFILE_AVATAR_INVALID"))
+                .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    /**
      * 验证资源不存在时不会返回无响应体的 404。
      *
      * @throws Exception MVC 请求执行失败时抛出
@@ -154,5 +226,12 @@ class SystemServiceApplicationTest {
                 .andExpect(jsonPath("$.code").value("COMMON_RESOURCE_NOT_FOUND"))
                 .andExpect(jsonPath("$.errorMsg").value("Resource not found"))
                 .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    private IdentityContext currentIdentity() {
+        return new IdentityContext(
+                "1001", "0", "11111111-1111-1111-1111-111111111111",
+                "MINI_PROGRAM", 1L, Set.of("EMPLOYEE"), Set.of(),
+                List.of(), Set.of("wechat"));
     }
 }

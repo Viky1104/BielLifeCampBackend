@@ -1,0 +1,147 @@
+spring:
+  cloud:
+    gateway:
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: false
+          routes:
+            - id: system-service
+              uri: lb://system-service
+              predicates:
+                - Path=/api/system/**
+            - id: communication-service
+              uri: lb://communication-service
+              predicates:
+                - Path=/api/communications/**
+            - id: workbench-service
+              uri: lb://workbench-service
+              predicates:
+                - Path=/api/workbench/**
+            - id: points-service
+              uri: lb://points-service
+              predicates:
+                - Path=/api/points/**
+            - id: activity-service
+              uri: lb://activity-service
+              predicates:
+                - Path=/api/activities/**
+            - id: community-service
+              uri: lb://community-service
+              predicates:
+                - Path=/api/community/**
+            - id: mall-service
+              uri: lb://mall-service
+              predicates:
+                - Path=/api/mall/**
+            - id: life-service
+              uri: lb://life-service
+              predicates:
+                - Path=/api/life/**
+            - id: order-view-service
+              uri: lb://order-view-service
+              predicates:
+                - Path=/api/order-views/**
+            - id: system-service-openapi
+              uri: lb://system-service
+              predicates:
+                - Path=/openapi/system-service/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: communication-service-openapi
+              uri: lb://communication-service
+              predicates:
+                - Path=/openapi/communication-service/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: workbench-service-openapi
+              uri: lb://workbench-service
+              predicates:
+                - Path=/openapi/workbench-service/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: points-service-openapi
+              uri: lb://points-service
+              predicates:
+                - Path=/openapi/points-service/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: activity-service-openapi
+              uri: lb://activity-service
+              predicates:
+                - Path=/openapi/activity-service/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: community-service-openapi
+              uri: lb://community-service
+              predicates:
+                - Path=/openapi/community-service/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: mall-service-openapi
+              uri: lb://mall-service
+              predicates:
+                - Path=/openapi/mall-service/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: life-service-openapi
+              uri: lb://life-service
+              predicates:
+                - Path=/openapi/life-service/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: order-view-service-openapi
+              uri: lb://order-view-service
+              predicates:
+                - Path=/openapi/order-view-service/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+          httpclient:
+            connect-timeout: 3000
+            response-timeout: 30s
+            compression: true
+          globalcors:
+            add-to-simple-url-handler-mapping: true
+            cors-configurations:
+              '[/**]':
+                allowedOriginPatterns:
+                  - http://localhost:5173
+                  - http://127.0.0.1:5173
+                allowedMethods:
+                  - GET
+                  - POST
+                  - PUT
+                  - PATCH
+                  - DELETE
+                  - OPTIONS
+                allowedHeaders:
+                  - Authorization
+                  - Content-Type
+                  - Idempotency-Key
+                  - X-Request-Id
+                exposedHeaders:
+                  - X-Request-Id
+                allowCredentials: false
+                maxAge: 3600
+    loadbalancer:
+      retry:
+        enabled: false
+      cache:
+        enabled: true
+        ttl: 10s
+        capacity: 256
+      stats:
+        micrometer:
+          enabled: true
+      eager-load:
+        clients:
+          - system-service
+          - communication-service
+          - workbench-service
+          - points-service
+          - activity-service
+          - community-service
+          - mall-service
+          - life-service
+          - order-view-service

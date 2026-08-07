@@ -7,9 +7,11 @@ import static org.mockito.Mockito.when;
 import com.biel.lifecamp.starter.security.IdentityContext;
 import com.biel.lifecamp.starter.web.ApiResponse;
 import com.biel.lifecamp.system.model.dto.AuthorizationSnapshotDTO;
+import com.biel.lifecamp.system.model.dto.CurrentProfileViewDTO;
 import com.biel.lifecamp.system.model.dto.EmployeeDTO;
 import com.biel.lifecamp.system.model.dto.response.CurrentSubjectResp;
 import com.biel.lifecamp.system.service.AuthService;
+import com.biel.lifecamp.system.service.ProfileService;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -28,12 +30,15 @@ class AuthControllerTest {
     @Test
     void unresolvedOrganizationIsReturnedAsZero() {
         AuthService authService = mock(AuthService.class);
-        AuthController controller = new AuthController(authService);
+        ProfileService profileService = mock(ProfileService.class);
+        AuthController controller = new AuthController(authService, profileService);
         when(authService.current(1001L, "system-service"))
                 .thenReturn(new AuthorizationSnapshotDTO(
                         new EmployeeDTO(1001L, "E1001", "Test Employee", null,
                                 "ACTIVE", "ACTIVE", 1L),
                         List.of("EMPLOYEE"), List.of(), List.of()));
+        when(profileService.current(1001L)).thenReturn(new CurrentProfileViewDTO(
+                "信息技术中心", "Java开发工程师", "小营友", "https://signed.example/avatar"));
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(IdentityContext.REQUEST_ATTRIBUTE, new IdentityContext(
                 "1001", "0", "11111111-1111-1111-1111-111111111111",
@@ -43,5 +48,9 @@ class AuthControllerTest {
         ApiResponse<CurrentSubjectResp> response = controller.me(request);
 
         assertThat(response.data().organizationId()).isEqualTo("0");
+        assertThat(response.data().organizationName()).isEqualTo("信息技术中心");
+        assertThat(response.data().positionName()).isEqualTo("Java开发工程师");
+        assertThat(response.data().nickname()).isEqualTo("小营友");
+        assertThat(response.data().avatarUrl()).isEqualTo("https://signed.example/avatar");
     }
 }

@@ -1,17 +1,18 @@
 # 伯恩生活营地后端运行与部署手册
 
-更新时间：2026-07-31
+更新时间：2026-08-06
 
-本文给出当前代码基线的本地运行、Nacos 配置、认证密钥准备和 ACK 部署检查步骤。当前已经验证
-`system-service` 可在 Windows、JDK 21、`nacos` Profile 和固定 RSA 密钥下启动；Gateway 与业务服务
-尚未部署到 ACK，Helm 模板仍是待环境化的基线，不能直接视为生产发布方案。
+本文给出当前代码基线的本地运行、Nacos 配置、认证密钥准备和 ACK 部署检查步骤。Gateway 与
+`system-service` 的环境运行配置已经迁移到 Nacos；应用包只保留服务名、端口、配置中心连接、代码
+结构扫描规则以及关闭自动路由、自动治理和 Flyway 的安全兜底。Gateway 与 `system-service` 已部署到
+ACK 开发环境；仓库中的环境 values 仅适用于该开发环境，不能直接视为生产发布方案。
 
 ## 1. 环境边界
 
 | 环境 | 配置中心 | 密钥与凭据 | 当前状态 |
 |---|---|---|---|
 | Windows 本地开发 | ACK Nacos `dev/LIFECAMP`，通过本机隧道访问 | IDEA 进程环境变量与本机 PEM 文件 | `system-service` 启动已验证 |
-| ACK 开发环境 | `nacos.biel-life-camp.svc.cluster.local:8848` | Kubernetes Secret 挂载文件及 Secret 环境变量 | Nacos、Redis 已部署，业务服务未部署 |
+| ACK 开发环境 | `nacos.biel-life-camp.svc.cluster.local:8848` | Kubernetes Secret 挂载文件及 Secret 环境变量 | Gateway、system-service、Nacos、Redis 已部署 |
 | 共享非生产/生产 | 环境独立的 Nacos、RDS、Tair、KMS | KMS/Kubernetes Secret，不使用开发密钥 | 尚未建设 |
 
 Nacos 只保存开关、超时、阈值、路由和 Secret 文件位置等非秘密配置。数据库密码、Redis ACL、EHR
@@ -90,6 +91,15 @@ PowerShell 中重新启动 IDEA；或者在本地 `SystemServiceApplication` Run
 | system-service Data ID | `system-service.yaml` |
 | gateway Data ID | `gateway.yaml` |
 
+仓库中的可审查配置基线是：
+
+- [`gateway.yaml`](nacos/dev/gateway.yaml)：显式路由、CORS、HTTP/LB 超时与缓存、监控、文档和网关认证参数。
+- [`system-service.yaml`](nacos/dev/system-service.yaml)：数据源/Redis 引用、上传限制、监控、OSS、EHR、认证、微信和 XXL-Job 参数。
+
+激活 `nacos` Profile 后使用非 `optional` 的 `spring.config.import`。Data ID 不存在、无权限或 Nacos
+不可达时应用直接启动失败，避免 Gateway 在无路由或弱认证状态下运行。仓库基线发布到 Nacos 后，
+以 Nacos 的配置历史作为配置回滚点；运行参数变更后仍应滚动重启并执行健康检查与冒烟测试。
+
 `system-service.yaml` 只保存非秘密配置和环境变量引用，例如：
 
 ```yaml
@@ -111,6 +121,29 @@ platform:
 本地运行时，环境变量优先级高于 Nacos。Nacos 中不要把密钥位置配置成裸 Windows 路径；正确格式是
 `file:D:/.../auth-private.pem`。ACK 中使用容器路径，例如
 `file:/run/secrets/lifecamp-auth/auth-private.pem`。
+
+数据库及认证链路至少需要按实际启用范围注入以下 Secret 环境变量：
+
+```text
+DB_URL
+DB_USERNAME
+DB_PASSWORD
+REDIS_USERNAME
+REDIS_PASSWORD
+AUTH_IDENTIFIER_PEPPER
+AUTH_IDENTITY_ENCRYPTION_KEY
+AUTH_TOKEN_PEPPER
+AUTH_GATEWAY_SERVICE_TOKEN
+EHR_ESB_AUTH
+WECHAT_APP_SECRET
+XXL_JOB_ACCESS_TOKEN
+```
+
+OSS 不在 Spring/Nacos 中配置 AccessKey 字段。SDK 默认凭证链从运行环境读取；本地联调使用
+`ALIBABA_CLOUD_ACCESS_KEY_ID` 和 `ALIBABA_CLOUD_ACCESS_KEY_SECRET`，临时凭据同时注入
+`ALIBABA_CLOUD_SECURITY_TOKEN`。ACK 优先配置 RRSA 的 `ALIBABA_CLOUD_ROLE_ARN`、
+`ALIBABA_CLOUD_OIDC_PROVIDER_ARN`、`ALIBABA_CLOUD_OIDC_TOKEN_FILE` 和
+`ALIBABA_CLOUD_ROLE_SESSION_NAME`，避免长期 AccessKey。
 
 ## 6. IDEA 启动 system-service
 
@@ -179,9 +212,48 @@ Invoke-RestMethod 'http://127.0.0.1:8081/v3/api-docs'
 8. 完成登录、刷新、会话撤销、权限版本、Gateway 转发和业务服务二次验签冒烟。
 9. 人工执行首次全量人员同步并核对数据库结果；通过前不开放小程序认证。
 
-当前 [`platform-service` Helm Chart](helm/platform-service) 只支持 `envFrom.secretRef`，尚未提供 RSA
-Secret 文件卷挂载。认证开启前必须先补充并验证只读 Secret volume/volumeMount；不得把 PEM 正文改成
-普通环境变量或写入 Nacos 来绕过该缺口。
+当前 [`platform-service` Helm Chart](helm/platform-service) 同时支持 `envFrom.secretRef` 和只读 RSA
+Secret 文件卷挂载。Pod 固定以 UID/GID `10001` 运行，RSA 文件以 `0440` 挂载并通过 `fsGroup=10001`
+读取；不得把 PEM 正文改成普通环境变量或写入 Nacos。
+
+### ACK 开发环境当前发布
+
+- Namespace：`biel-life-camp`；Helm release：`system-service`、`gateway`。
+- ACK 服务注册到 Nacos `ACK` cluster，并显式启用 Nacos LoadBalancer；本机开发实例保留在 `DEFAULT`
+  cluster，避免网关误路由到本机地址。
+- system-service：2 个副本，HPA 2–4；镜像 digest
+  `sha256:f9cd0db839f4ac9c60c50559ed10779fcf9ade822231751cdafd769ebee2cc72`。
+- Gateway：2 个副本，HPA 2–4；镜像 digest
+  `sha256:9c93881f72acdcc0a89afdcea33084f01bde40cda520f693320fe6278ed5ae93`。
+- 环境 values：[`values-dev-system-service.yaml`](helm/platform-service/values-dev-system-service.yaml) 和
+  [`values-dev-gateway.yaml`](helm/platform-service/values-dev-gateway.yaml)。
+- 数据库现有结构已只读核对 V1–V6，并建立 Flyway 版本 6 基线；后续迁移由独立纯 Flyway Job 执行。
+- OSS 头像存储已在 ACK 开发环境启用：私有 Bucket `biel-life-camp-test`、Region `cn-shenzhen`、
+  公网签名 Endpoint `oss-cn-shenzhen.aliyuncs.com`、对象前缀 `profiles/avatars`。昵称修改、头像上传、
+  签名下载、头像替换和旧对象删除已经通过隔离测试用户完成端到端验证。EHR 同步仍显式关闭。
+- OSS AccessKey 只存在于 `system-service-oss-dev-secret`，不进入 Nacos 或仓库。当前 ACK 未启用 RRSA，
+  且操作账号没有 RAM 管理权限，因此开发环境暂时使用长期 AccessKey；应由 RAM 管理员创建仅允许
+  `biel-life-camp-test/profiles/avatars/*` Put/Get/Delete 的专用身份，或启用 RRSA 后替换并轮换当前密钥。
+- Gateway 到 system-service 的鉴权调用使用集群内 HTTP、服务令牌和 NetworkPolicy；system-service
+  保持 ClusterIP，不直接暴露公网。
+- 小程序 API 入口为 `https://lifecamp-test.bielcrystal.com`，通过 Nginx Ingress 复用现有公网 NLB，
+  HTTP 强制跳转 HTTPS，TLS 使用覆盖 `*.bielcrystal.com` 的证书。DNS 管理员需创建：
+  `lifecamp-test.bielcrystal.com CNAME nlb-pkheesf2fnmqr7yil7.cn-shenzhen.nlb.aliyuncsslb.com`。
+- 当前通配符证书有效期至 2026-11-22；证书续签后需同步更新 `biel-life-camp` Namespace 中的
+  `20261122bielcrystal.com` TLS Secret。
+- DNS 生效后，在微信小程序后台把 `https://lifecamp-test.bielcrystal.com` 加入 `request` 合法域名；
+  头像通过 `wx.uploadFile` 上传时还需把该域名加入 `uploadFile` 合法域名。签名头像 URL 使用
+  `https://biel-life-camp-test.oss-cn-shenzhen.aliyuncs.com`，需将此 OSS 域名加入 `downloadFile`
+  合法域名。
+
+查看和回滚 Helm 版本：
+
+```powershell
+helm history system-service -n biel-life-camp
+helm history gateway -n biel-life-camp
+helm rollback system-service <revision> -n biel-life-camp --wait
+helm rollback gateway <revision> -n biel-life-camp --wait
+```
 
 ## 10. 回滚与停机
 

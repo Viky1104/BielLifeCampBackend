@@ -16,6 +16,12 @@ It does not assign administrator roles to any employee and does not initialize p
 the employee `source_type`. Passwords are stored only as `{bcrypt}` hashes; EHR missing-snapshot
 reconciliation only disables `EHR` employees and preserves `LOCAL_BOOTSTRAP` subjects.
 
+`V6__user_profile_avatar_storage.sql` adds the private object-storage key to the existing
+`sys_wechat_profile` table. Apply V6 before deploying the profile-enabled system-service version.
+Production keeps application Flyway disabled and runs the migration through a controlled migration job.
+Deployment, verification, monitoring, and rollback procedures are documented in
+`../reference/system_user_profile_api_and_oss_runbook.md`.
+
 `../reference/system_db_auth_login_ehr_schema.sql` is the consolidated MySQL 8 schema for a new, empty database.
 It is intended for design review and controlled fresh initialization. It must not be executed after Flyway V1 through V4,
 and it is not an alternative upgrade path for an existing database.
